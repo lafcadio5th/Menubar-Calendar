@@ -145,7 +145,15 @@ class CalendarViewModel: ObservableObject {
     func addEvent(_ event: CalendarEvent) {
         Task {
             do {
-                // Convert CalendarEvent to EventKit event
+                // Determine target calendar
+                var targetCalendar: EKCalendar? = nil
+                if let calId = event.calendarId {
+                     // Since we don't expose eventKitService.calendars directly as a dictionary, search for it
+                     // Or force fetch. But we have availableCalendars.
+                     targetCalendar = availableCalendars.first { $0.calendarIdentifier == calId }
+                }
+
+                // Calculate dates
                 let startDate: Date
                 let endDate: Date
                 
@@ -153,8 +161,16 @@ class CalendarViewModel: ObservableObject {
                     startDate = calendar.startOfDay(for: event.date)
                     endDate = calendar.date(byAdding: .day, value: 1, to: startDate)!
                 } else if let time = event.time {
-                    startDate = combineDateTime(date: event.date, time: time)
-                    endDate = calendar.date(byAdding: .hour, value: 1, to: startDate)!
+                    // Re-calculate start from date component + time component
+                    let start = combineDateTime(date: event.date, time: time)
+                    
+                    // Simple logic: if event.endDate is set and > start, use it. Else +1h.
+                    if event.endDate > start {
+                        endDate = event.endDate
+                    } else {
+                        endDate = calendar.date(byAdding: .hour, value: 1, to: start)!
+                    }
+                    startDate = start 
                 } else {
                     startDate = calendar.startOfDay(for: event.date)
                     endDate = calendar.date(byAdding: .hour, value: 1, to: startDate)!
@@ -165,6 +181,9 @@ class CalendarViewModel: ObservableObject {
                     startDate: startDate,
                     endDate: endDate,
                     isAllDay: event.isAllDay,
+                    calendar: targetCalendar,
+                    location: event.location,
+                    url: event.url,
                     notes: event.notes
                 )
                 
@@ -179,7 +198,29 @@ class CalendarViewModel: ObservableObject {
     }
     
     func deleteEvent(_ event: CalendarEvent) {
-        events.removeAll { $0.id == event.id }
+        Task {
+            if let ekEventId = event.ekEventId {
+                // Try to find the event first
+                // Actually EventKitService needs a delete method that takes ID or EKEvent
+                // Let's assume we need to fetch it first or add a helper to service
+                // For now, let's add a safe delete to EventKitService
+                do {
+                   try await eventKitService.deleteEvent(withId: ekEventId)
+                   await MainActor.run {
+                       events.removeAll { $0.id == event.id }
+                       // also reload to be safe
+                       loadEventsFromEventKit()
+                   }
+                } catch {
+                    print("Error deleting event: \(error)")
+                }
+            } else {
+                // Fallback for events without ID (should not happen for EK events)
+                await MainActor.run {
+                     events.removeAll { $0.id == event.id }
+                }
+            }
+        }
     }
     
     // MARK: - EventKit Integration
@@ -234,18 +275,24 @@ class CalendarViewModel: ObservableObject {
         // Convert EKEvent to CalendarEvent
         events = ekEvents.compactMap { ekEvent in
             guard let title = ekEvent.title,
-                  let startDate = ekEvent.startDate else {
+                  let startDate = ekEvent.startDate,
+                  let endDate = ekEvent.endDate else {
                 return nil
             }
             
             return CalendarEvent(
                 title: title,
                 date: calendar.startOfDay(for: startDate),
+                endDate: endDate,
                 time: ekEvent.isAllDay ? nil : startDate,
                 color: colorForCalendar(ekEvent.calendar),
                 isAllDay: ekEvent.isAllDay,
+                location: ekEvent.location,
+                url: ekEvent.url,
                 notes: ekEvent.notes,
-                reminder: .none
+                reminder: .none, // mapping reminder is complex, simplify for now
+                calendarId: ekEvent.calendar.calendarIdentifier,
+                ekEventId: ekEvent.eventIdentifier
             )
         }
         

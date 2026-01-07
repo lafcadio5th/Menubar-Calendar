@@ -9,6 +9,8 @@ struct CalendarPopoverView: View {
     @AppStorage("showWeekNumbers") private var showWeekNumbers = false
     @AppStorage("showLunarCalendar") private var showLunarCalendar = false
     
+    @State private var selectedEvent: CalendarEvent? = nil // New state for details
+    
     private var weekdays: [String] {
         if startWeekOnMonday {
             return ["一", "二", "三", "四", "五", "六", "日"]
@@ -251,6 +253,12 @@ struct CalendarPopoverView: View {
                                         RoundedRectangle(cornerRadius: 8)
                                             .fill(Color.primary.opacity(0.04))
                                     )
+                                    .contentShape(Rectangle()) // Ensure tap area
+                                    .onTapGesture {
+                                        withAnimation(.spring()) {
+                                            selectedEvent = event
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -263,6 +271,40 @@ struct CalendarPopoverView: View {
         }
         .frame(width: 340, height: 650)
         .background(Color(NSColor.windowBackgroundColor))
+        .overlay(
+            ZStack {
+                if let event = selectedEvent {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                selectedEvent = nil
+                            }
+                        }
+                    
+                    VStack {
+                        Spacer()
+                        EventDetailView(
+                            event: event,
+                            onClose: {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    selectedEvent = nil
+                                }
+                            },
+                            onDelete: {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    viewModel.deleteEvent(event)
+                                    selectedEvent = nil
+                                }
+                            }
+                        )
+                        .frame(height: 480)
+                        .transition(.move(edge: .bottom))
+                        .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
+                    }
+                }
+            }
+        )
         .sheet(isPresented: $showingAddEvent) {
             AddEventView(viewModel: viewModel, isPresented: $showingAddEvent)
         }

@@ -73,6 +73,8 @@ class EventKitService: ObservableObject {
         endDate: Date,
         isAllDay: Bool = false,
         calendar: EKCalendar? = nil,
+        location: String? = nil,
+        url: URL? = nil,
         notes: String? = nil
     ) throws -> EKEvent {
         let event = EKEvent(eventStore: eventStore)
@@ -81,6 +83,8 @@ class EventKitService: ObservableObject {
         event.endDate = endDate
         event.isAllDay = isAllDay
         event.calendar = calendar ?? eventStore.defaultCalendarForNewEvents
+        event.location = location
+        event.url = url
         event.notes = notes
         
         try eventStore.save(event, span: .thisEvent)
@@ -89,5 +93,16 @@ class EventKitService: ObservableObject {
     
     func deleteEvent(_ event: EKEvent) throws {
         try eventStore.remove(event, span: .thisEvent)
+    }
+    
+    func deleteEvent(withId identifier: String) async throws {
+        // Need to allow access first? assuming caller has access
+        if let event = eventStore.event(withIdentifier: identifier) {
+            try eventStore.remove(event, span: .thisEvent)
+        } else {
+            // Event might already be deleted or not found
+            // You might want to throw an error or just ignore
+            print("Event not found for deletion: \(identifier)")
+        }
     }
 }

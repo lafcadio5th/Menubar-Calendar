@@ -63,12 +63,17 @@ enum ReminderOption: String, CaseIterable, Codable {
 struct CalendarEvent: Identifiable, Codable {
     let id: UUID
     var title: String
-    var date: Date
+    var date: Date // Start Date
+    var endDate: Date // New: End Date
     var time: Date?
     var colorHex: String
     var isAllDay: Bool
+    var location: String? // New
+    var url: URL? // New
     var notes: String?
     var reminder: ReminderOption
+    var calendarId: String? // New: To identify which calendar it belongs to
+    var ekEventId: String? // New: To link back to EventKit
     
     var color: Color {
         Color(hex: colorHex) ?? .blue
@@ -81,6 +86,15 @@ struct CalendarEvent: Identifiable, Codable {
         guard let time = time else { return "" }
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
+        
+        // Calculate end time string if available and not same as start
+        if !isAllDay {
+           let endFormatter = DateFormatter()
+           endFormatter.dateFormat = "HH:mm"
+           let endString = endFormatter.string(from: endDate)
+           return "\(formatter.string(from: time)) - \(endString)"
+        }
+        
         return formatter.string(from: time)
     }
     
@@ -88,20 +102,36 @@ struct CalendarEvent: Identifiable, Codable {
         id: UUID = UUID(),
         title: String,
         date: Date,
+        endDate: Date? = nil,
         time: Date?,
         color: Color,
         isAllDay: Bool,
+        location: String? = nil,
+        url: URL? = nil,
         notes: String?,
-        reminder: ReminderOption
+        reminder: ReminderOption,
+        calendarId: String? = nil,
+        ekEventId: String? = nil
     ) {
         self.id = id
         self.title = title
         self.date = date
+        // If endDate is not provided, default to date + 1 hour or same day for all day
+        if let end = endDate {
+            self.endDate = end
+        } else {
+             // Default logic: 1 hour duration
+             self.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: date) ?? date
+        }
         self.time = time
         self.colorHex = color.toHex() ?? "#007AFF"
         self.isAllDay = isAllDay
+        self.location = location
+        self.url = url
         self.notes = notes
         self.reminder = reminder
+        self.calendarId = calendarId
+        self.ekEventId = ekEventId
     }
 }
 
