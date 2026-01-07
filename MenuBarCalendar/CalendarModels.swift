@@ -144,24 +144,23 @@ extension Color {
         var rgb: UInt64 = 0
         guard Scanner(string: hexSanitized).scanHexInt64(&rgb) else { return nil }
         
-        let r = Double((rgb & 0xFF0000) >> 16) / 255.0
-        let g = Double((rgb & 0x00FF00) >> 8) / 255.0
-        let b = Double(rgb & 0x0000FF) / 255.0
-        
-        self.init(red: r, green: g, blue: b)
+        self.init(
+            red: Double((rgb & 0xFF0000) >> 16) / 255.0,
+            green: Double((rgb & 0x00FF00) >> 8) / 255.0,
+            blue: Double(rgb & 0x0000FF) / 255.0
+        )
     }
     
     func toHex() -> String? {
-        guard let components = NSColor(self).cgColor.components else { return nil }
+        // Simple implementation for sRGB
+        guard let components = self.cgColor?.components, components.count >= 3 else { return nil }
         
-        let r = components.count > 0 ? components[0] : 0
-        let g = components.count > 1 ? components[1] : 0
-        let b = components.count > 2 ? components[2] : 0
+        let r = Float(components[0])
+        let g = Float(components[1])
+        let b = Float(components[2])
         
-        return String(format: "#%02X%02X%02X",
-                      Int(r * 255),
-                      Int(g * 255),
-                      Int(b * 255))
+        let hex = String(format: "#%02lX%02lX%02lX", lroundf(r * 255), lroundf(g * 255), lroundf(b * 255))
+        return hex
     }
     
     static let eventColors: [Color] = [
@@ -171,5 +170,30 @@ extension Color {
     
     static func randomEventColor() -> Color {
         eventColors.randomElement() ?? .blue
+    }
+}
+
+// MARK: - App Theme
+enum AppTheme: String, CaseIterable, Identifiable {
+    case system = "system"
+    case light = "light"
+    case dark = "dark"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .system: return "跟隨系統"
+        case .light: return "淺色"
+        case .dark: return "深色"
+        }
+    }
+    
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
     }
 }

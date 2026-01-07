@@ -12,6 +12,9 @@ struct SettingsView: View {
     
     @State private var launchAtLogin = false
     
+    @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
+    var appTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .system }
+    
     var body: some View {
         VStack(spacing: 0) {
             // 標題欄
@@ -54,6 +57,7 @@ struct SettingsView: View {
             .padding(.top, 8)
         }
         .frame(width: 550, height: 450)
+        .preferredColorScheme(appTheme.colorScheme)
         .onAppear { checkLaunchAtLoginStatus() }
     }
     
@@ -69,6 +73,8 @@ struct GeneralSettingsTab: View {
     @Binding var launchAtLogin: Bool
     @Binding var menuBarFormat: MenuBarFormat
     
+    @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
+    
     var body: some View {
         Form {
             Section {
@@ -76,6 +82,15 @@ struct GeneralSettingsTab: View {
                     .onChange(of: launchAtLogin) { _, newValue in
                         setLaunchAtLogin(newValue)
                     }
+            }
+            
+            Section("外觀") {
+                Picker("主題", selection: $appThemeRaw) {
+                    ForEach(AppTheme.allCases) { theme in
+                        Text(theme.displayName).tag(theme.rawValue)
+                    }
+                }
+                // .pickerStyle(.segmented) // 移除 segmented 樣式，改用預設下拉選單，避免選項擠壓
             }
             
             Section("選單列顯示格式") {
@@ -117,6 +132,8 @@ struct CalendarSettingsTab: View {
     @State private var hiddenCalendarIDs: [String] = []
     
     @AppStorage("eventIndicatorColor") private var eventIndicatorColorHex = "#007AFF"
+    @AppStorage("showFestiveEffects") private var showFestiveEffects = true
+    @AppStorage("demoFestival") var demoFestivalRaw: String = Festival.none.rawValue
     
     var body: some View {
         Form {
@@ -124,6 +141,15 @@ struct CalendarSettingsTab: View {
                 Toggle("週一為每週第一天", isOn: $startWeekOnMonday)
                 Toggle("顯示週數", isOn: $showWeekNumbers)
                 Toggle("顯示農曆", isOn: $showLunarCalendar)
+                Toggle("顯示節慶特效", isOn: $showFestiveEffects)
+                
+                if showFestiveEffects {
+                    Picker("特效預覽", selection: $demoFestivalRaw) {
+                        ForEach(Festival.allCases) { festival in
+                            Text(festival.displayName).tag(festival.rawValue)
+                        }
+                    }
+                }
                 
                 ColorPicker("有事件的日期顏色", selection: Binding(
                     get: { Color(hex: eventIndicatorColorHex) ?? .blue },

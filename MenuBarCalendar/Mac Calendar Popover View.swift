@@ -8,6 +8,21 @@ struct CalendarPopoverView: View {
     @AppStorage("startWeekOnMonday") private var startWeekOnMonday = false
     @AppStorage("showWeekNumbers") private var showWeekNumbers = false
     @AppStorage("showLunarCalendar") private var showLunarCalendar = false
+    @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
+    @AppStorage("showFestiveEffects") private var showFestiveEffects = true
+    @AppStorage("demoFestival") var demoFestivalRaw: String = Festival.none.rawValue
+    
+    var appTheme: AppTheme {
+        AppTheme(rawValue: appThemeRaw) ?? .system
+    }
+    
+    private var currentFestival: Festival {
+        // 優先使用 demo 設定
+        if let demo = Festival(rawValue: demoFestivalRaw), demo != .none {
+            return demo
+        }
+        return HolidayManager.shared.getCurrentFestival()
+    }
     
     @State private var selectedEvent: CalendarEvent? = nil // New state for details
     
@@ -271,8 +286,14 @@ struct CalendarPopoverView: View {
         }
         .frame(width: 340, height: 650)
         .background(Color(NSColor.windowBackgroundColor))
+        .preferredColorScheme(appTheme.colorScheme)
         .overlay(
             ZStack {
+                // Festive Effects Overlay
+                if showFestiveEffects && currentFestival != .none {
+                    FestivalDecorationView(festival: currentFestival)
+                }
+                
                 if let event = selectedEvent {
                     Color.black.opacity(0.3)
                         .ignoresSafeArea()
@@ -307,6 +328,7 @@ struct CalendarPopoverView: View {
         )
         .sheet(isPresented: $showingAddEvent) {
             AddEventView(viewModel: viewModel, isPresented: $showingAddEvent)
+                .preferredColorScheme(appTheme.colorScheme)
         }
     }
     
