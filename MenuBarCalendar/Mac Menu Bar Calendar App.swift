@@ -16,6 +16,7 @@ struct MacMenuBarCalendarApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
+    var menu: NSMenu!
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("✅ App 已啟動！")
@@ -28,18 +29,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             print("✅ Button 已取得")
             
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "zh_TW")
-            formatter.dateFormat = "M月d日 EEE"
-            
             button.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "行事曆")
-            button.title = " " + formatter.string(from: Date())
             button.imagePosition = .imageLeading
             button.action = #selector(togglePopover)
             button.target = self
             
             // 添加右鍵選單
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            
+            // 更新選單列標題
+            updateMenuBarTitle()
+            
+            // 每分鐘更新一次時間
+            Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                self?.updateMenuBarTitle()
+            }
+            
+            // 監聽設定變更
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(updateMenuBarTitle),
+                name: UserDefaults.didChangeNotification,
+                object: nil
+            )
             
             print("✅ Button 設定完成，標題：\(button.title)")
         } else {
@@ -59,9 +71,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("✅ Popover 已建立")
     }
     
+    @objc func updateMenuBarTitle() {
+        guard let button = statusItem.button else { return }
+        
+        // 讀取用戶設定的格式
+        let formatRawValue = UserDefaults.standard.string(forKey: "menuBarFormat") ?? "dateAndDay"
+        let format = MenuBarFormat(rawValue: formatRawValue) ?? .dateAndDay
+        
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_TW")
+        
+        switch format {
+        case .dateOnly:
+            formatter.dateFormat = "M月d日"
+        case .dateAndDay:
+            formatter.dateFormat = "M月d日 EEE"
+        case .full:
+            formatter.dateFormat = "yyyy年M月d日 EEEE"
+        }
+        
+        button.title = " " + formatter.string(from: Date())
+    }
     
     func setupMenu() {
-        let menu = NSMenu()
+        menu = NSMenu()
         
         // 設定選項
         let settingsItem = NSMenuItem(title: "設定...", action: #selector(openSettings), keyEquivalent: ",")
@@ -74,8 +107,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let quitItem = NSMenuItem(title: "結束 Menu Bar 行事曆", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
-        
-        statusItem.menu = menu
     }
     
     @objc func openSettings() {
@@ -99,7 +130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let event = NSApp.currentEvent {
             if event.type == .rightMouseUp {
                 print("🖱️ 右鍵點擊 - 顯示選單")
-                statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+                menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
                 return
             }
         }

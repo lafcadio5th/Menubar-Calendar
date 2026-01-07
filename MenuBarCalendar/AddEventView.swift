@@ -4,6 +4,7 @@ import SwiftUI
 struct AddEventView: View {
     @ObservedObject var viewModel: CalendarViewModel
     @Binding var isPresented: Bool
+    @AppStorage("defaultReminderTime") private var defaultReminderTime = 15
     
     @State private var title: String = ""
     @State private var selectedTime: Date = Date()
@@ -174,6 +175,10 @@ struct AddEventView: View {
         }
         .frame(width: 360, height: 550)
         .background(VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow))
+        .onAppear {
+            // 設定預設提醒時間
+            reminder = ReminderOption.fromMinutes(defaultReminderTime)
+        }
     }
     
     private func addEvent() {

@@ -11,9 +11,24 @@ class CalendarViewModel: ObservableObject {
     @Published var isLoadingEvents = false
     @Published var hasCalendarAccess = false
     
+    @Published var availableCalendars: [EKCalendar] = []
+    
     private let calendar = Calendar.current
     private var cancellables = Set<AnyCancellable>()
     private let eventKitService = EventKitService.shared
+    
+    // Store hidden calendar IDs in UserDefaults
+    private var hiddenCalendarIDs: Set<String> {
+        get {
+            let ids = UserDefaults.standard.stringArray(forKey: "hiddenCalendarIDs") ?? []
+            return Set(ids)
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue), forKey: "hiddenCalendarIDs")
+            objectWillChange.send()
+            loadEventsFromEventKit() // Reload events when visibility changes
+        }
+    }
     
     init() {
         generateDays()
@@ -31,6 +46,38 @@ class CalendarViewModel: ObservableObject {
                 self?.loadEventsFromEventKit()
             }
             .store(in: &cancellables)
+            
+        // Listen for calendar changes
+        eventKitService.$calendars
+            .receive(on: RunLoop.main)
+            .assign(to: \.availableCalendars, on: self)
+            .store(in: &cancellables)
+            
+        // Listen for UserDefaults changes (for settings updates from other windows)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in
+                // Only reload if relevant keys changed? 
+                // For simplicity, we can just reload. But we should be careful about loops.
+                // Actually, just checking if hiddenCalendarIDs changed might be enough, but that's expensive.
+                // Let's just reload. It's a settings change, user expects update.
+                self?.loadEventsFromEventKit()
+                self?.generateDays() // reload days if startWeekOnMonday changed
+            }
+            .store(in: &cancellables)
+    }
+    
+    // MARK: - Calendar Management
+    
+    func isCalendarVisible(_ calendar: EKCalendar) -> Bool {
+        !hiddenCalendarIDs.contains(calendar.calendarIdentifier)
+    }
+    
+    func toggleCalendarVisibility(_ calendar: EKCalendar) {
+        if hiddenCalendarIDs.contains(calendar.calendarIdentifier) {
+            hiddenCalendarIDs.remove(calendar.calendarIdentifier)
+        } else {
+            hiddenCalendarIDs.insert(calendar.calendarIdentifier)
+        }
     }
     
     // MARK: - Computed Properties
@@ -148,6 +195,7 @@ class CalendarViewModel: ObservableObject {
         }
         
         if hasCalendarAccess {
+            eventKitService.fetchCalendars() // 獲取日曆列表
             loadEventsFromEventKit()
         }
     }
@@ -158,6 +206,7 @@ class CalendarViewModel: ObservableObject {
             await MainActor.run {
                 hasCalendarAccess = granted
                 if granted {
+                    eventKitService.fetchCalendars() // 獲取日曆列表
                     loadEventsFromEventKit()
                 }
             }
@@ -173,7 +222,14 @@ class CalendarViewModel: ObservableObject {
         let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: currentMonth))!
         let endOfMonth = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: startOfMonth)!
         
-        let ekEvents = eventKitService.fetchEvents(from: startOfMonth, to: endOfMonth)
+        // Filter visible calendars
+        let visibleCalendars = availableCalendars.filter { isCalendarVisible($0) }
+        
+        // 如果 availableCalendars 為空（尚未加載），傳入 nil 以獲取所有（預設行為）
+        // 如果已加載但 visibleCalendars 為空（用戶隱藏全部），傳入空陣列（不顯示任何事件）
+        let calendarsToFetch = availableCalendars.isEmpty ? nil : visibleCalendars
+        
+        let ekEvents = eventKitService.fetchEvents(from: startOfMonth, to: endOfMonth, calendars: calendarsToFetch)
         
         // Convert EKEvent to CalendarEvent
         events = ekEvents.compactMap { ekEvent in
@@ -223,6 +279,10 @@ class CalendarViewModel: ObservableObject {
     private func generateDays() {
         var result: [CalendarDay] = []
         
+        // 讀取設定：是否週一為第一天
+        let startWeekOnMonday = UserDefaults.standard.bool(forKey: "startWeekOnMonday")
+        let weekdayOffset = startWeekOnMonday ? 1 : 0
+        
         let year = calendar.component(.year, from: currentMonth)
         let month = calendar.component(.month, from: currentMonth)
         
@@ -231,7 +291,13 @@ class CalendarViewModel: ObservableObject {
             return
         }
         
-        let firstWeekday = calendar.component(.weekday, from: firstDayOfMonth)
+        var firstWeekday = calendar.component(.weekday, from: firstDayOfMonth)
+        
+        // 調整週一開始 (weekday: 1=Sunday, 2=Monday, ..., 7=Saturday)
+        if startWeekOnMonday {
+            firstWeekday = firstWeekday == 1 ? 7 : firstWeekday - 1
+        }
+        
         let daysInMonth = range.count
         
         // Previous month days
@@ -242,14 +308,18 @@ class CalendarViewModel: ObservableObject {
         for i in 0..<(firstWeekday - 1) {
             let day = previousMonthDays - (firstWeekday - 2) + i
             if let date = calendar.date(from: DateComponents(year: year, month: month - 1, day: day)) {
-                result.append(CalendarDay(day: day, date: date, isCurrentMonth: false, isWeekend: isWeekend(date)))
+                let weekNum = calendar.component(.weekOfYear, from: date)
+                let lunar = getLunarDay(date)
+                result.append(CalendarDay(day: day, date: date, isCurrentMonth: false, isWeekend: isWeekend(date), weekNumber: weekNum, lunarDay: lunar))
             }
         }
         
         // Current month days
         for day in 1...daysInMonth {
             if let date = calendar.date(from: DateComponents(year: year, month: month, day: day)) {
-                result.append(CalendarDay(day: day, date: date, isCurrentMonth: true, isWeekend: isWeekend(date)))
+                let weekNum = calendar.component(.weekOfYear, from: date)
+                let lunar = getLunarDay(date)
+                result.append(CalendarDay(day: day, date: date, isCurrentMonth: true, isWeekend: isWeekend(date), weekNumber: weekNum, lunarDay: lunar))
             }
         }
         
@@ -257,7 +327,9 @@ class CalendarViewModel: ObservableObject {
         let remainingDays = 42 - result.count
         for day in 1...remainingDays {
             if let date = calendar.date(from: DateComponents(year: year, month: month + 1, day: day)) {
-                result.append(CalendarDay(day: day, date: date, isCurrentMonth: false, isWeekend: isWeekend(date)))
+                let weekNum = calendar.component(.weekOfYear, from: date)
+                let lunar = getLunarDay(date)
+                result.append(CalendarDay(day: day, date: date, isCurrentMonth: false, isWeekend: isWeekend(date), weekNumber: weekNum, lunarDay: lunar))
             }
         }
         
@@ -267,5 +339,20 @@ class CalendarViewModel: ObservableObject {
     private func isWeekend(_ date: Date) -> Bool {
         let weekday = calendar.component(.weekday, from: date)
         return weekday == 1 || weekday == 7
+    }
+    
+    private func getLunarDay(_ date: Date) -> String {
+        let chineseCalendar = Calendar(identifier: .chinese)
+        let components = chineseCalendar.dateComponents([.day], from: date)
+        
+        guard let day = components.day else { return "" }
+        
+        let lunarDayTexts = [
+            "初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
+            "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+            "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"
+        ]
+        
+        return day > 0 && day <= lunarDayTexts.count ? lunarDayTexts[day - 1] : ""
     }
 }

@@ -7,6 +7,8 @@ struct CalendarDay: Identifiable {
     let date: Date
     let isCurrentMonth: Bool
     let isWeekend: Bool
+    let weekNumber: Int
+    let lunarDay: String
 }
 
 // MARK: - Reminder Option
@@ -40,6 +42,19 @@ enum ReminderOption: String, CaseIterable, Codable {
         case .thirtyMinutes: return 30 * 60
         case .oneHour: return 60 * 60
         case .oneDay: return 24 * 60 * 60
+        }
+    }
+    
+    static func fromMinutes(_ minutes: Int) -> ReminderOption {
+        switch minutes {
+        case 0: return .none
+        case 5: return .fiveMinutes
+        case 10: return .fiveMinutes  // 使用最接近的選項
+        case 15: return .fifteenMinutes
+        case 30: return .thirtyMinutes
+        case 60: return .oneHour
+        case 1440: return .oneDay
+        default: return .none
         }
     }
 }

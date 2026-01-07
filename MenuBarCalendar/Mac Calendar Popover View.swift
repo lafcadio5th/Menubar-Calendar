@@ -5,14 +5,24 @@ import SwiftUI
 struct CalendarPopoverView: View {
     @StateObject private var viewModel = CalendarViewModel()
     @State private var showingAddEvent = false
+    @AppStorage("startWeekOnMonday") private var startWeekOnMonday = false
+    @AppStorage("showWeekNumbers") private var showWeekNumbers = false
+    @AppStorage("showLunarCalendar") private var showLunarCalendar = false
     
-    private let weekdays = ["日", "一", "二", "三", "四", "五", "六"]
+    private var weekdays: [String] {
+        if startWeekOnMonday {
+            return ["一", "二", "三", "四", "五", "六", "日"]
+        } else {
+            return ["日", "一", "二", "三", "四", "五", "六"]
+        }
+    }
+    
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
     
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
-                .frame(height: 30)
+                .frame(height: 15)
             
             // ========== 月份導航 ==========
             HStack(spacing: 0) {
@@ -57,41 +67,108 @@ struct CalendarPopoverView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                
+                // 設定按鈕
+                Button(action: { openSettingsWindow() }) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(width: 28, height: 28)
+                        
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 8)
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 12)
             
-            Divider()
-            
-            // ========== 星期標題 ==========
-            HStack(spacing: 0) {
-                ForEach(weekdays, id: \.self) { day in
-                    Text(day)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            
-            // ========== 日曆網格 ==========
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(viewModel.days, id: \.id) { day in
-                    DayCell(
-                        day: day,
-                        isSelected: viewModel.isSelected(day),
-                        isToday: viewModel.isToday(day),
-                        hasEvents: viewModel.hasEvents(on: day.date)
-                    )
-                    .onTapGesture {
-                        viewModel.selectDate(day.date)
+            // 主要內容容器 - 統一網格佈局
+            VStack(spacing: 0) {
+                
+                // 1. 統一標題列 (週 + 日 一 二 ...)
+                HStack(spacing: 0) {
+                    // 週數標題
+                    if showWeekNumbers {
+                        Text("週")
+                            .font(.system(size: 11, weight: .bold)) // 修改：字體對齊日期標題
+                            .foregroundColor(.secondary.opacity(0.8))
+                            .frame(maxWidth: .infinity) // 關鍵：均分寬度
+                            .frame(height: 30) // 高度與日期標題一致
+                        
+                        Divider()
+                            .frame(height: 16) // 分隔線高度微調
+                    }
+                    
+                    // 星期標題
+                    ForEach(weekdays, id: \.self) { day in
+                        Text(day)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity) // 關鍵：均分寬度
+                            .frame(height: 30)
                     }
                 }
+                
+                Divider()
+                
+                // 2. 統一內容網格 (週數值 + 日期值)
+                // 這裡我們需要手動構建行與列，以確保週數與日期在同一行絕對對齊
+                
+                // 計算總行數 (通常是 6 行)
+                let totalRows = 6
+                
+                VStack(spacing: 4) { // 行間距
+                    ForEach(0..<totalRows, id: \.self) { rowIndex in
+                        HStack(spacing: 0) {
+                            
+                            // 週數列 (每行的第一欄)
+                            if showWeekNumbers {
+                                let weekIndex = rowIndex * 7
+                                if weekIndex < viewModel.days.count {
+                                    Text("\(viewModel.days[weekIndex].weekNumber)")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.secondary.opacity(0.85))
+                                        .frame(maxWidth: .infinity) // 關鍵：均分寬度，與標題 "週" 對齊
+                                        .frame(height: showLunarCalendar ? 54 : 48)
+                                } else {
+                                    Spacer().frame(maxWidth: .infinity)
+                                }
+                                
+                                Divider()
+                                    .frame(height: showLunarCalendar ? 40 : 36)
+                            }
+                            
+                            // 日期列 (每行的後7欄)
+                            ForEach(0..<7) { colIndex in
+                                let dayIndex = rowIndex * 7 + colIndex
+                                if dayIndex < viewModel.days.count {
+                                    let day = viewModel.days[dayIndex]
+                                    DayCell(
+                                        day: day,
+                                        isSelected: viewModel.isSelected(day),
+                                        isToday: viewModel.isToday(day),
+                                        hasEvents: viewModel.hasEvents(on: day.date),
+                                        showLunar: showLunarCalendar
+                                    )
+                                    .frame(maxWidth: .infinity) // 關鍵：均分寬度
+                                    .onTapGesture {
+                                        viewModel.selectDate(day.date)
+                                    }
+                                } else {
+                                    Spacer().frame(maxWidth: .infinity)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 4)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 4)
             .padding(.bottom, 12)
-            
             Divider()
             
             // ========== 事件列表 ==========
@@ -190,6 +267,19 @@ struct CalendarPopoverView: View {
             AddEventView(viewModel: viewModel, isPresented: $showingAddEvent)
         }
     }
+    
+    private func openSettingsWindow() {
+        let settingsView = SettingsView()
+        let hostingController = NSHostingController(rootView: settingsView)
+        
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "設定"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        window.level = .floating
+    }
 }
 
 // MARK: - Day Cell
@@ -198,32 +288,57 @@ struct DayCell: View {
     let isSelected: Bool
     let isToday: Bool
     let hasEvents: Bool
+    let showLunar: Bool
+    
+    @State private var isHovering = false
     
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: showLunar ? 3 : 2) {
             ZStack {
+                // 背景圓形
                 if isSelected {
                     Circle()
                         .fill(Color.blue)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 34, height: 34)
                 } else if isToday {
                     Circle()
-                        .stroke(Color.blue, lineWidth: 1.5)
-                        .frame(width: 32, height: 32)
+                        .stroke(Color.blue, lineWidth: 2)
+                        .frame(width: 34, height: 34)
+                } else if isHovering {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .frame(width: 34, height: 34)
                 }
                 
-                Text("\(day.day)")
-                    .font(.system(size: 14, weight: isToday || isSelected ? .semibold : .regular))
-                    .foregroundColor(textColor)
+                VStack(spacing: 2) {
+                    Text("\(day.day)")
+                        .font(.system(size: 14, weight: isToday || isSelected ? .semibold : .regular))
+                        .foregroundColor(textColor)
+                    
+                    if showLunar && !day.lunarDay.isEmpty {
+                        Text(day.lunarDay)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(lunarTextColor)
+                    }
+                }
             }
-            .frame(width: 36, height: 36)
+            .frame(width: 38, height: 38)
             
-            Circle()
-                .fill(hasEvents && !isSelected ? Color.blue : Color.clear)
-                .frame(width: 4, height: 4)
+            // 事件標記 - 改為橫條更明顯
+            if hasEvents && !isSelected {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.blue)
+                    .frame(width: 16, height: 2.5)
+            } else {
+                Spacer()
+                    .frame(height: 2.5)
+            }
         }
-        .frame(height: 44)
+        .frame(height: showLunar ? 54 : 48)
         .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovering = hovering
+        }
     }
     
     private var textColor: Color {
@@ -235,6 +350,16 @@ struct DayCell: View {
             return .secondary
         }
         return .primary
+    }
+    
+    private var lunarTextColor: Color {
+        if isSelected {
+            return .white.opacity(0.85)
+        } else if !day.isCurrentMonth {
+            return .secondary.opacity(0.3)
+        } else {
+            return .secondary.opacity(0.75)
+        }
     }
 }
 

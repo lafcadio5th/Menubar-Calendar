@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import EventKit
 
 // MARK: - Settings View
 struct SettingsView: View {
@@ -12,24 +13,47 @@ struct SettingsView: View {
     @State private var launchAtLogin = false
     
     var body: some View {
-        TabView {
-            GeneralSettingsTab(launchAtLogin: $launchAtLogin, menuBarFormat: $menuBarFormat)
-                .tabItem { Label("一般", systemImage: "gear") }
+        VStack(spacing: 0) {
+            // 標題欄
+            HStack {
+                Text("設定")
+                    .font(.system(size: 18, weight: .semibold))
+                
+                Spacer()
+                
+                Button(action: {
+                    NSApplication.shared.keyWindow?.close()
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
             
-            CalendarSettingsTab(
-                showWeekNumbers: $showWeekNumbers,
-                startWeekOnMonday: $startWeekOnMonday,
-                showLunarCalendar: $showLunarCalendar
-            )
-            .tabItem { Label("日曆", systemImage: "calendar") }
-            
-            NotificationSettingsTab(defaultReminderTime: $defaultReminderTime)
-                .tabItem { Label("通知", systemImage: "bell") }
-            
-            AboutTab()
-                .tabItem { Label("關於", systemImage: "info.circle") }
+            TabView {
+                GeneralSettingsTab(launchAtLogin: $launchAtLogin, menuBarFormat: $menuBarFormat)
+                    .tabItem { Label("一般", systemImage: "gear") }
+                
+                CalendarSettingsTab(
+                    showWeekNumbers: $showWeekNumbers,
+                    startWeekOnMonday: $startWeekOnMonday,
+                    showLunarCalendar: $showLunarCalendar
+                )
+                .tabItem { Label("日曆", systemImage: "calendar") }
+                
+                NotificationSettingsTab(defaultReminderTime: $defaultReminderTime)
+                    .tabItem { Label("通知", systemImage: "bell") }
+                
+                AboutTab()
+                    .tabItem { Label("關於", systemImage: "info.circle") }
+            }
+            .padding(.top, 8)
         }
-        .frame(width: 400, height: 280)
+        .frame(width: 550, height: 450)
         .onAppear { checkLaunchAtLoginStatus() }
     }
     
@@ -88,16 +112,90 @@ struct CalendarSettingsTab: View {
     @Binding var startWeekOnMonday: Bool
     @Binding var showLunarCalendar: Bool
     
+    @ObservedObject private var eventKitService = EventKitService.shared
+    // store hidden IDs (inverted logic)
+    @State private var hiddenCalendarIDs: [String] = []
+    
     var body: some View {
         Form {
             Section {
-                Toggle("顯示週數", isOn: $showWeekNumbers)
                 Toggle("週一為每週第一天", isOn: $startWeekOnMonday)
+                Toggle("顯示週數", isOn: $showWeekNumbers)
                 Toggle("顯示農曆", isOn: $showLunarCalendar)
+            }
+            
+            Section("顯示的行事曆") {
+                if eventKitService.calendars.isEmpty {
+                    VStack(alignment: .leading) {
+                        Text("無可用的行事曆")
+                            .foregroundColor(.secondary)
+                        Text("請確認已授予行事曆存取權限")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(eventKitService.calendars, id: \.calendarIdentifier) { calendar in
+                                HStack {
+                                    Circle()
+                                        .fill(Color(cgColor: calendar.cgColor))
+                                        .frame(width: 8, height: 8)
+                                    
+                                    Text(calendar.title)
+                                    
+                                    Spacer()
+                                    
+                                    if !hiddenCalendarIDs.contains(calendar.calendarIdentifier) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    toggleCalendar(calendar.calendarIdentifier)
+                                }
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.1))
+                                        .opacity(hiddenCalendarIDs.contains(calendar.calendarIdentifier) ? 0 : 0.5)
+                                )
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(height: 200)
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                }
             }
         }
         .formStyle(.grouped)
         .padding()
+        .onAppear {
+            eventKitService.fetchCalendars()
+            loadHiddenCalendars()
+        }
+    }
+    
+    private func loadHiddenCalendars() {
+        hiddenCalendarIDs = UserDefaults.standard.stringArray(forKey: "hiddenCalendarIDs") ?? []
+    }
+    
+    private func toggleCalendar(_ id: String) {
+        if let index = hiddenCalendarIDs.firstIndex(of: id) {
+            hiddenCalendarIDs.remove(at: index)
+        } else {
+            hiddenCalendarIDs.append(id)
+        }
+        // Save immediately
+        UserDefaults.standard.set(hiddenCalendarIDs, forKey: "hiddenCalendarIDs")
     }
 }
 
