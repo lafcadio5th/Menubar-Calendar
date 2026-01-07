@@ -15,48 +15,72 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
     var appTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .system }
     
+    @State private var selectedTab: SettingsTab = .general
+    
+    enum SettingsTab: String, CaseIterable, Identifiable {
+        case general = "一般"
+        case calendar = "日曆"
+        case notification = "通知"
+        case about = "關於"
+        var id: String { rawValue }
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
             // 標題欄
-            HStack {
+            ZStack {
                 Text("設定")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity, alignment: .center)
                 
-                Spacer()
-                
-                Button(action: {
-                    NSApplication.shared.keyWindow?.close()
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.secondary)
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        NSApplication.shared.keyWindow?.close()
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.vertical, 16)
             
-            TabView {
-                GeneralSettingsTab(launchAtLogin: $launchAtLogin, menuBarFormat: $menuBarFormat)
-                    .tabItem { Label("一般", systemImage: "gear") }
-                
-                CalendarSettingsTab(
-                    showWeekNumbers: $showWeekNumbers,
-                    startWeekOnMonday: $startWeekOnMonday,
-                    showLunarCalendar: $showLunarCalendar
-                )
-                .tabItem { Label("日曆", systemImage: "calendar") }
-                
-                NotificationSettingsTab(defaultReminderTime: $defaultReminderTime)
-                    .tabItem { Label("通知", systemImage: "bell") }
-                
-                AboutTab()
-                    .tabItem { Label("關於", systemImage: "info.circle") }
+            // 分頁切換
+            Picker("", selection: $selectedTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
             }
-            .padding(.top, 8)
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+            
+            Divider()
+            
+            // 內容區域
+            Group {
+                switch selectedTab {
+                case .general:
+                    GeneralSettingsTab(launchAtLogin: $launchAtLogin, menuBarFormat: $menuBarFormat)
+                case .calendar:
+                    CalendarSettingsTab(
+                        showWeekNumbers: $showWeekNumbers,
+                        startWeekOnMonday: $startWeekOnMonday,
+                        showLunarCalendar: $showLunarCalendar
+                    )
+                case .notification:
+                    NotificationSettingsTab(defaultReminderTime: $defaultReminderTime)
+                case .about:
+                    AboutTab()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 550, height: 450)
+        .frame(width: 500, height: 500) // Slightly adjusted frame
+        .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(appTheme.colorScheme)
         .onAppear { checkLaunchAtLoginStatus() }
     }
@@ -263,29 +287,94 @@ struct NotificationSettingsTab: View {
 
 // MARK: - About Tab
 struct AboutTab: View {
+    let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "calendar.circle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(
-                    LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
+        VStack(spacing: 24) {
+            // App Header
+            VStack(spacing: 12) {
+                Image(systemName: "calendar.badge.clock") // Changed icon slightly for freshness
+                    .font(.system(size: 60))
+                    .foregroundStyle(.white)
+                    .frame(width: 100, height: 100)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue, Color(nsColor: .systemIndigo)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 10, x: 0, y: 5)
+                
+                VStack(spacing: 4) {
+                    Text("Menu Bar Calendar")
+                        .font(.system(size: 20, weight: .bold))
+                    
+                    Text("版本 \(appVersion)")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+            }
             
-            Text("Menu Bar 行事曆")
-                .font(.system(size: 18, weight: .semibold))
-            
-            Text("版本 1.0.0")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            
-            Text("一個簡潔優雅的 macOS 選單列行事曆應用程式")
-                .font(.system(size: 12))
+            Text("一個簡潔優雅的 macOS 選單列行事曆，\n讓您的時間管理更加輕鬆愉快。")
+                .font(.system(size: 13))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
+                .lineSpacing(4)
+                .padding(.horizontal)
+            
+            // Actions
+            HStack(spacing: 16) {
+                AboutLinkButton(title: "GitHub", icon: "star.fill", url: URL(string: "https://github.com/lafcadio5th/Menubar-Calendar")!)
+                AboutLinkButton(title: "回報問題", icon: "ant.fill", url: URL(string: "https://github.com/lafcadio5th/Menubar-Calendar/issues")!)
+                // AboutLinkButton(title: "聯絡作者", icon: "envelope.fill", url: URL(string: "mailto:kelvin@example.com")!)
+            }
             
             Spacer()
+            
+            Text("© 2026 Kelvin Tan. All rights reserved.")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.6))
         }
-        .padding(24)
+        .padding(.vertical, 32)
+        .padding(.horizontal, 24)
+    }
+}
+
+struct AboutLinkButton: View {
+    let title: String
+    let icon: String
+    let url: URL
+    @State private var isHovering = false
+    
+    var body: some View {
+        Link(destination: url) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                Text(title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .frame(width: 80, height: 64)
+            .background(isHovering ? Color.primary.opacity(0.05) : Color.clear)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
