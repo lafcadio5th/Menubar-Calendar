@@ -333,6 +333,7 @@ struct DayCell: View {
     let showLunar: Bool
     
     @State private var isHovering = false
+    @AppStorage("eventIndicatorColor") private var eventIndicatorColorHex = "#007AFF"
     
     var body: some View {
         VStack(spacing: showLunar ? 3 : 2) {
@@ -366,15 +367,9 @@ struct DayCell: View {
             }
             .frame(width: 38, height: 38)
             
-            // 事件標記 - 改為橫條更明顯
-            if hasEvents && !isSelected {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.blue)
-                    .frame(width: 16, height: 2.5)
-            } else {
-                Spacer()
-                    .frame(height: 2.5)
-            }
+            // 移除事件標記橫條，改為文字顏色區分
+            // 為了保持佈局高度一致，使用透明 Spacer 佔位（或直接讓 VStack 自動置中）
+            // 由於外層 Grid 限制了高度，VStack 會垂直置中，這裡不需要額外的 Spacer
         }
         .frame(height: showLunar ? 54 : 48)
         .contentShape(Rectangle())
@@ -386,7 +381,13 @@ struct DayCell: View {
     private var textColor: Color {
         if isSelected {
             return .white
-        } else if !day.isCurrentMonth {
+        }
+        
+        if hasEvents {
+            return Color(hex: eventIndicatorColorHex) ?? .blue
+        }
+        
+        if !day.isCurrentMonth {
             return .secondary.opacity(0.4)
         } else if day.isWeekend {
             return .secondary

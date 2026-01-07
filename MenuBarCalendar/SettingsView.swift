@@ -116,12 +116,19 @@ struct CalendarSettingsTab: View {
     // store hidden IDs (inverted logic)
     @State private var hiddenCalendarIDs: [String] = []
     
+    @AppStorage("eventIndicatorColor") private var eventIndicatorColorHex = "#007AFF"
+    
     var body: some View {
         Form {
             Section {
                 Toggle("週一為每週第一天", isOn: $startWeekOnMonday)
                 Toggle("顯示週數", isOn: $showWeekNumbers)
                 Toggle("顯示農曆", isOn: $showLunarCalendar)
+                
+                ColorPicker("有事件的日期顏色", selection: Binding(
+                    get: { Color(hex: eventIndicatorColorHex) ?? .blue },
+                    set: { eventIndicatorColorHex = $0.toHex() ?? "#007AFF" }
+                ))
             }
             
             Section("顯示的行事曆") {
