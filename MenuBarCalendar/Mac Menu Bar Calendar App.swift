@@ -38,10 +38,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.action = #selector(togglePopover)
             button.target = self
             
+            // 添加右鍵選單
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            
             print("✅ Button 設定完成，標題：\(button.title)")
         } else {
             print("❌ 無法取得 Button")
         }
+        
+        // 建立選單
+        setupMenu()
         
         // 建立 Popover
         popover = NSPopover()
@@ -53,6 +59,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("✅ Popover 已建立")
     }
     
+    
+    func setupMenu() {
+        let menu = NSMenu()
+        
+        // 設定選項
+        let settingsItem = NSMenuItem(title: "設定...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
+        // 結束選項
+        let quitItem = NSMenuItem(title: "結束 Menu Bar 行事曆", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+        
+        statusItem.menu = menu
+    }
+    
+    @objc func openSettings() {
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    @objc func quit() {
+        NSApplication.shared.terminate(nil)
+    }
+    
     @objc func togglePopover() {
         print("🖱️ togglePopover 被呼叫")
         
@@ -61,6 +95,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         
+        // 檢查是否為右鍵點擊
+        if let event = NSApp.currentEvent {
+            if event.type == .rightMouseUp {
+                print("🖱️ 右鍵點擊 - 顯示選單")
+                statusItem.menu?.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height), in: button)
+                return
+            }
+        }
+        
+        // 左鍵點擊 - 切換 popover
         if popover.isShown {
             print("📕 關閉 Popover")
             popover.performClose(nil)
@@ -71,3 +115,4 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+
