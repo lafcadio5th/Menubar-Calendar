@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 應用程式基本資訊 -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_TW</string>
+    <key>CFBundleDisplayName</key>
+    <string>Menu Bar 行事曆</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    
+    <!-- macOS 版本要求 -->
+    <key>LSMinimumSystemVersion</key>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+    
+    <!-- 作為選單列應用程式 (無 Dock 圖標) -->
+    <key>LSUIElement</key>
+    <true/>
+    
+    <!-- 主要 Storyboard -->
+    <key>NSMainStoryboardFile</key>
+    <string>Main</string>
+    
+    <!-- 應用程式類別 -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    
+    <!-- 高解析度支援 -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    
+    <!-- 權限說明 -->
+    <key>NSCalendarsUsageDescription</key>
+    <string>此應用程式需要存取您的行事曆來顯示和管理事件。</string>
+    
+    <key>NSRemindersUsageDescription</key>
+    <string>此應用程式需要存取您的提醒事項來顯示待辦事項。</string>
+    
+    <key>NSUserNotificationUsageDescription</key>
+    <string>此應用程式需要傳送通知來提醒您即將到來的事件。</string>
+    
+    <!-- 沙盒權限 -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+    
+    <key>com.apple.security.personal-information.reminders</key>
+    <true/>
+    
+    <!-- 網路存取 (用於 iCloud 同步) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    
+    <!-- 版權資訊 -->
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026. All rights reserved.</string>
+</dict>
+</plist>
