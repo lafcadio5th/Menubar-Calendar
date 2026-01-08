@@ -276,6 +276,59 @@ struct CalendarPopoverView: View {
                                     }
                                 }
                             }
+                            
+                            // Todoist Tasks
+                            if !viewModel.todoistTasks.isEmpty {
+                                Divider()
+                                    .padding(.vertical, 8)
+                                
+                                HStack {
+                                    Image(systemName: "checklist")
+                                        .foregroundColor(Color(red: 228/255, green: 67/255, blue: 50/255)) // Todoist Red
+                                    Text("Todoist")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.bottom, 4)
+                                
+                                ForEach(viewModel.todoistTasks) { task in
+                                    HStack(alignment: .top, spacing: 12) {
+                                        Image(systemName: "circle")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.secondary)
+                                            .padding(.top, 3)
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(task.content)
+                                                .font(.system(size: 14))
+                                                .lineLimit(2)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            // Optional: Display Time if available in task description or due date
+                                            if let duestring = task.due?.string {
+                                                  Text(duestring)
+                                                    .font(.system(size: 11))
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.primary.opacity(0.04))
+                                    )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if let url = URL(string: task.url) {
+                                           NSWorkspace.shared.open(url)
+                                        }
+                                    }
+                                }
+                            }
                         }
                         .padding(.horizontal, 16)
                         .padding(.bottom, 12)

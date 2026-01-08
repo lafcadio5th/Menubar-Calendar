@@ -11,6 +11,8 @@ class CalendarViewModel: ObservableObject {
     @Published var isLoadingEvents = false
     @Published var hasCalendarAccess = false
     
+    @Published var todoistTasks: [TodoistTask] = []
+    
     @Published var availableCalendars: [EKCalendar] = []
     
     private let calendar = Calendar.current
@@ -42,8 +44,11 @@ class CalendarViewModel: ObservableObject {
             .store(in: &cancellables)
         
         $selectedDate
-            .sink { [weak self] _ in
+            .sink { [weak self] newDate in
                 self?.loadEventsFromEventKit()
+                Task {
+                    await self?.fetchTodoistTasks(for: newDate)
+                }
             }
             .store(in: &cancellables)
             
@@ -56,14 +61,47 @@ class CalendarViewModel: ObservableObject {
         // Listen for UserDefaults changes (for settings updates from other windows)
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in
-                // Only reload if relevant keys changed? 
-                // For simplicity, we can just reload. But we should be careful about loops.
-                // Actually, just checking if hiddenCalendarIDs changed might be enough, but that's expensive.
-                // Let's just reload. It's a settings change, user expects update.
                 self?.loadEventsFromEventKit()
                 self?.generateDays() // reload days if startWeekOnMonday changed
+                self?.setupAutoRefreshTimer() // Check if refresh interval changed
             }
             .store(in: &cancellables)
+            
+        // Setup initial timer
+        setupAutoRefreshTimer()
+    }
+    
+    private var refreshTimer: Timer?
+    
+    private func setupAutoRefreshTimer() {
+        // Invalidate existing timer
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        
+        // Ensure UI updates happen on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            let interval = UserDefaults.standard.integer(forKey: "todoistRefreshInterval")
+            guard interval > 0 else {
+                print("🚫 Todoist auto-refresh disabled")
+                return
+            }
+            
+            print("⏰ Starting Todoist auto-refresh every \(interval) seconds")
+            // Create new timer
+            self.refreshTimer = Timer.scheduledTimer(withTimeInterval: TimeInterval(interval), repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                print("🔄 Auto-refreshing Todoist tasks...")
+                Task {
+                    await self.fetchTodoistTasks(for: self.selectedDate)
+                }
+            }
+        }
+    }
+    
+    deinit {
+        refreshTimer?.invalidate()
     }
     
     // MARK: - Calendar Management
@@ -123,7 +161,27 @@ class CalendarViewModel: ObservableObject {
     }
     
     func selectDate(_ date: Date) {
-        selectedDate = date
+        selectedDate = calendar.startOfDay(for: date)
+        // updateSelectedDateEvents() // This is a computed property, no need to call a method
+        
+        // Fetch Todoist tasks
+        Task {
+            await fetchTodoistTasks(for: selectedDate)
+        }
+    }
+    
+    // MARK: - Todoist
+    @MainActor
+    func fetchTodoistTasks(for date: Date) async {
+        // Clear previous tasks first or keep them while loading? Clear is safer UI wise to avoid confusion
+        todoistTasks = [] 
+        
+        do {
+            let tasks = try await TodoistService.shared.fetchTasks(for: date)
+            self.todoistTasks = tasks
+        } catch {
+            print("Failed to fetch Todoist tasks: \(error)")
+        }
     }
     
     // MARK: - Day Helpers

@@ -21,6 +21,7 @@ struct SettingsView: View {
         case general = "一般"
         case calendar = "日曆"
         case notification = "通知"
+        case integration = "整合"
         case about = "關於"
         var id: String { rawValue }
     }
@@ -73,6 +74,8 @@ struct SettingsView: View {
                     )
                 case .notification:
                     NotificationSettingsTab(defaultReminderTime: $defaultReminderTime)
+                case .integration:
+                    IntegrationSettingsTab()
                 case .about:
                     AboutTab()
                 }
@@ -375,6 +378,113 @@ struct AboutLinkButton: View {
                 isHovering = hovering
             }
         }
+    }
+}
+
+// MARK: - Integration Settings Tab
+struct IntegrationSettingsTab: View {
+    @AppStorage("todoistApiToken") private var todoistApiToken = ""
+    @AppStorage("todoistRefreshInterval") private var todoistRefreshInterval = 0
+    @State private var isTestingConnection = false
+    @State private var connectionStatus: ConnectionStatus = .none
+    
+    enum ConnectionStatus {
+        case none
+        case success
+        case failure(String)
+    }
+    
+    var body: some View {
+        Form {
+            Section(header: Text("Todoist").font(.headline)) {
+                Text("輸入您的 API Token 以整合待辦事項。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                SecureField("API Token", text: $todoistApiToken)
+                    .textFieldStyle(.roundedBorder)
+                
+                HStack {
+                    Button("測試連線") {
+                        testConnection()
+                    }
+                    .disabled(todoistApiToken.isEmpty || isTestingConnection)
+                    
+                    if isTestingConnection {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(height: 16)
+                    }
+                    
+                    switch connectionStatus {
+                    case .success:
+                        Label("連線成功", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    case .failure(let message):
+                        Label("連線失敗: \(message)", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                            .help(message)
+                    case .none:
+                        EmptyView()
+                    }
+                }
+            }
+            
+            Section(header: Text("自動更新")) {
+                Picker("更新頻率", selection: $todoistRefreshInterval) {
+                    Text("手動").tag(0)
+                    Text("每 1 分鐘").tag(60)
+                    Text("每 5 分鐘").tag(300)
+                    Text("每 15 分鐘").tag(900)
+                    Text("每 30 分鐘").tag(1800)
+                    Text("每 1 小時").tag(3600)
+                }
+                .pickerStyle(.menu) // Dropdown style usually looks better for this
+                
+                Text(todoistRefreshInterval == 0 ? "僅在開啟或切換日期時更新。" : "將在背景自動更新任務列表。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Section {
+                 Link("如何取得 API Token?", destination: URL(string: "https://todoist.com/prefs/integrations")!)
+                    .font(.caption)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+    
+    private func testConnection() {
+        isTestingConnection = true
+        connectionStatus = .none
+        
+        let token = todoistApiToken
+        guard !token.isEmpty else { return }
+        
+        // Simple API call to verify token (Fetch projects lightly)
+        guard let url = URL(string: "https://api.todoist.com/rest/v2/projects") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            DispatchQueue.main.async {
+                isTestingConnection = false
+                
+                if let error = error {
+                    connectionStatus = .failure(error.localizedDescription)
+                    return
+                }
+                
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    connectionStatus = .success
+                } else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    connectionStatus = .failure("錯誤碼: \(code)")
+                }
+            }
+        }.resume()
     }
 }
 
