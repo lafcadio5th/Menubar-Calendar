@@ -1,10 +1,12 @@
 import Foundation
 import CoreLocation
+import WeatherKit
 
 class WeatherService {
     static let shared = WeatherService()
     
     private let locationManager = CLLocationManager()
+    private let weatherKit = WeatherKit.WeatherService.shared
     
     private init() {
         locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
@@ -29,46 +31,17 @@ class WeatherService {
             throw WeatherError.locationUnavailable
         }
         
-        // Fetch weather from Open-Meteo
-        let latitude = location.coordinate.latitude
-        let longitude = location.coordinate.longitude
+        // Fetch weather from WeatherKit
+        let weather = try await weatherKit.weather(for: location)
         
-        let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(latitude)&longitude=\(longitude)&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code&timezone=auto"
-        
-        guard let url = URL(string: urlString) else {
-            throw WeatherError.invalidURL
-        }
-        
-        let (data, response) = try await URLSession.shared.data(from: url)
-        
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw WeatherError.networkError
-        }
-        
-        let decoder = JSONDecoder()
-        let weatherResponse = try decoder.decode(OpenMeteoResponse.self, from: data)
-        
-        return WeatherData(from: weatherResponse)
-    }
-}
-
-// MARK: - Open-Meteo Response Models
-struct OpenMeteoResponse: Decodable {
-    let current: CurrentWeather
-    
-    struct CurrentWeather: Decodable {
-        let temperature_2m: Double
-        let relative_humidity_2m: Double
-        let apparent_temperature: Double
-        let weather_code: Int
+        return WeatherData(from: weather.currentWeather)
     }
 }
 
 enum WeatherError: LocalizedError {
     case noLocationPermission
     case locationUnavailable
-    case invalidURL
-    case networkError
+    case weatherKitError
     
     var errorDescription: String? {
         switch self {
@@ -76,10 +49,8 @@ enum WeatherError: LocalizedError {
             return "需要位置權限才能取得天氣資訊"
         case .locationUnavailable:
             return "無法取得目前位置"
-        case .invalidURL:
-            return "無效的 API 網址"
-        case .networkError:
-            return "網路連線錯誤"
+        case .weatherKitError:
+            return "無法取得天氣資料"
         }
     }
 }

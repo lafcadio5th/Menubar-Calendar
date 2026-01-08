@@ -83,11 +83,11 @@ struct CalendarPopoverView: View {
             // ========== Unified Header Box (Weather Bg + Info + Weekdays) ==========
             ZStack(alignment: .top) {
                 // 1. Weather Background Layer
-                if let weather = viewModel.currentWeather {
+                if showWeather, let weather = viewModel.currentWeather {
                     WeatherAnimationView(weatherCode: weather.weatherCode, timeOfDay: currentTimeOfDay)
-                        .frame(height: 200) // Bleed down behind grid
+                        .frame(height: 110) // Bleed down behind grid
                         .frame(maxWidth: .infinity)
-                        .offset(y: -30)
+
                 }
                 
                 // 2. Content Layer (Info Row + Navigation Row + Weekday Row)
@@ -184,13 +184,11 @@ struct CalendarPopoverView: View {
                     }
                     .frame(height: 30)
                 }
-                .padding(.top, 20)
-                .offset(y: 50) // 指令：整組往下移 50px
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .padding(.bottom, 10) // 指令：靠下對齊，並且距離紅線 10px
             }
-            .frame(height: 110) // 指令：鎖死高度
-            .clipped()
+            .frame(height: 110) // 指令：Header 高度鎖死
                 Divider()
-                    .padding(.top, 0)
             
             // ========== Main Content (Grid + Events) ==========
             VStack(spacing: 0) {
