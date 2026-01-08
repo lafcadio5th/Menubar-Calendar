@@ -43,8 +43,13 @@ struct CalendarPopoverView: View {
         return 0 // Day
     }
     
+    @AppStorage("showWeather") private var showWeather = false
+    
     // MARK: - Dynamic Text Color
     private func weatherTextColor(for weatherCode: Int) -> Color {
+        // If weather is disabled, always use primary color
+        if !showWeather { return .primary }
+        
         if currentTimeOfDay == 2 { return .white } // Night
         switch weatherCode {
         case 51...65, 80...82, 95...99: // Rain/Storm
@@ -56,6 +61,9 @@ struct CalendarPopoverView: View {
     }
     
     private func weatherSecondaryTextColor(for weatherCode: Int) -> Color {
+        // If weather is disabled, use secondary color
+        if !showWeather { return .secondary }
+        
         let baseColor = weatherTextColor(for: weatherCode)
         return baseColor == .white ? Color.white.opacity(0.85) : Color.secondary
     }
@@ -84,18 +92,22 @@ struct CalendarPopoverView: View {
                 
                 // 2. Content Layer (Info Row + Navigation Row + Weekday Row)
                 VStack(spacing: 0) {
-                    if let weather = viewModel.currentWeather {
-                        let textColor = weatherTextColor(for: weather.weatherCode)
-                        let secondaryColor = weatherSecondaryTextColor(for: weather.weatherCode)
+                    let weather = viewModel.currentWeather
+                    // If weather contains data, use its code. Otherwise default to clear day (0) but showWeather flag handles color fallback
+                    let weatherCode = weather?.weatherCode ?? 0
+                    let textColor = weatherTextColor(for: weatherCode)
+                    let secondaryColor = weatherSecondaryTextColor(for: weatherCode)
+                    
+                    // Row 1: Date & Weather (Height 32)
+                    HStack(alignment: .center) {
+                        Text(viewModel.currentMonthYear)
+                            .font(.system(size: 19, weight: .bold))
+                            .foregroundColor(textColor)
                         
-                        // Row 1: Date & Weather (Height 32)
-                        HStack(alignment: .center) {
-                            Text(viewModel.currentMonthYear)
-                                .font(.system(size: 19, weight: .bold))
-                                .foregroundColor(textColor)
-                            
-                            Spacer()
-                            
+                        Spacer()
+                        
+                        // Weather Info (Only show if enabled and available)
+                        if showWeather, let weather = weather {
                             HStack(spacing: 6) {
                                 Image(systemName: weather.symbolName)
                                     .font(.system(size: 14))
@@ -107,50 +119,50 @@ struct CalendarPopoverView: View {
                             }
                             .foregroundColor(textColor)
                         }
-                        .padding(.horizontal, 16)
-                        .frame(height: 32)
-                        
-                        // Row 2: Navigation (Height 28)
-                        HStack(spacing: 0) {
-                            Button(action: { viewModel.previousMonth() }) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(textColor == .white ? .white : .blue)
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            
-                            Spacer()
-                            
-                            Button("今天") { viewModel.goToToday() }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(textColor == .white ? Color.white.opacity(0.9) : .blue)
-                            
-                            Spacer()
-                            
-                            Button(action: { viewModel.nextMonth() }) {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(textColor == .white ? .white : .blue)
-                                    .frame(width: 28, height: 28)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            
-                            Button(action: { openSettingsWindow() }) {
-                                Image(systemName: "gearshape.fill")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(secondaryColor)
-                                    .frame(width: 24, height: 24)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(height: 28)
                     }
+                    .padding(.horizontal, 16)
+                    .frame(height: 32)
+                    
+                    // Row 2: Navigation (Height 28)
+                    HStack(spacing: 0) {
+                        Button(action: { viewModel.previousMonth() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(textColor == .white ? .white : .blue)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Spacer()
+                        
+                        Button("今天") { viewModel.goToToday() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(textColor == .white ? Color.white.opacity(0.9) : .blue)
+                        
+                        Spacer()
+                        
+                        Button(action: { viewModel.nextMonth() }) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(textColor == .white ? .white : .blue)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Button(action: { openSettingsWindow() }) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(secondaryColor)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
                     
                     // Row 3: Weekdays (Height 30)
                     HStack(spacing: 0) {
