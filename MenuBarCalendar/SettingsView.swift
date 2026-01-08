@@ -101,6 +101,7 @@ struct GeneralSettingsTab: View {
     @Binding var menuBarFormat: MenuBarFormat
     
     @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
+    @AppStorage("showWeather") private var showWeather = false
     
     var body: some View {
         Form {
@@ -127,6 +128,16 @@ struct GeneralSettingsTab: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+            }
+            
+            Section("天氣") {
+                Toggle("顯示天氣資訊", isOn: $showWeather)
+                
+                if showWeather {
+                    Text("需要位置權限才能顯示天氣")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

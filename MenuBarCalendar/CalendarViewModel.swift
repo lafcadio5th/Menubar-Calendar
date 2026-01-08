@@ -12,12 +12,14 @@ class CalendarViewModel: ObservableObject {
     @Published var hasCalendarAccess = false
     
     @Published var todoistTasks: [TodoistTask] = []
+    @Published var currentWeather: WeatherData?
     
     @Published var availableCalendars: [EKCalendar] = []
     
     private let calendar = Calendar.current
     private var cancellables = Set<AnyCancellable>()
     private let eventKitService = EventKitService.shared
+    private let weatherService = WeatherService.shared
     
     // Store hidden calendar IDs in UserDefaults
     private var hiddenCalendarIDs: Set<String> {
@@ -64,11 +66,13 @@ class CalendarViewModel: ObservableObject {
                 self?.loadEventsFromEventKit()
                 self?.generateDays() // reload days if startWeekOnMonday changed
                 self?.setupAutoRefreshTimer() // Check if refresh interval changed
+                self?.setupWeatherTimer() // Check if weather settings changed
             }
             .store(in: &cancellables)
             
-        // Setup initial timer
+        // Setup initial timers
         setupAutoRefreshTimer()
+        setupWeatherTimer()
     }
     
     private var refreshTimer: Timer?
@@ -100,8 +104,63 @@ class CalendarViewModel: ObservableObject {
         }
     }
     
+    
     deinit {
         refreshTimer?.invalidate()
+        weatherTimer?.invalidate()
+    }
+    
+    // MARK: - Weather
+    
+    private var weatherTimer: Timer?
+    
+    func setupWeatherTimer() {
+        // Invalidate existing timer
+        weatherTimer?.invalidate()
+        weatherTimer = nil
+        
+        // Check if weather is enabled
+        let showWeather = UserDefaults.standard.bool(forKey: "showWeather")
+        guard showWeather else {
+            currentWeather = nil
+            return
+        }
+        
+        // Fetch immediately
+        Task {
+            await fetchWeather()
+        }
+        
+        // Setup 30-minute timer
+        DispatchQueue.main.async { [weak self] in
+            self?.weatherTimer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+                Task {
+                    await self?.fetchWeather()
+                }
+            }
+        }
+    }
+    
+    @MainActor
+    func fetchWeather() async {
+        do {
+            let weather = try await weatherService.fetchWeather()
+            self.currentWeather = weather
+            print("✅ Weather fetched: \(weather.temperatureFormatted), \(weather.condition)")
+        } catch {
+            print("❌ Failed to fetch weather: \(error.localizedDescription)")
+            self.currentWeather = nil
+        }
+    }
+    
+    func requestWeatherPermission() {
+        weatherService.requestLocationPermission()
+        // Wait a bit then try to fetch
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            Task {
+                await self.fetchWeather()
+            }
+        }
     }
     
     // MARK: - Calendar Management

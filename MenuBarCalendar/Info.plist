@@ -56,6 +56,9 @@
     <key>NSUserNotificationUsageDescription</key>
     <string>此應用程式需要傳送通知來提醒您即將到來的事件。</string>
     
+    <key>NSLocationUsageDescription</key>
+    <string>此應用程式需要存取您的位置來顯示當地天氣資訊。</string>
+    
     <!-- 沙盒權限 -->
     <key>com.apple.security.app-sandbox</key>
     <true/>
