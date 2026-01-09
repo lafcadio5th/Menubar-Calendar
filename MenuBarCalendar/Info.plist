@@ -57,7 +57,13 @@
     <string>此應用程式需要傳送通知來提醒您即將到來的事件。</string>
     
     <key>NSLocationUsageDescription</key>
-    <string>此應用程式需要存取您的位置來顯示當地天氣資訊。</string>
+    <string>此應用程式需要存取您的位置來顯示當地天氣資訊和計算到會議地點的通勤時間。</string>
+    
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>用於計算到會議地點的通勤時間和顯示路線資訊。</string>
+    
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>用於提供基於位置的提醒功能（例如：到達特定地點時自動提醒）。</string>
     
     <!-- 沙盒權限 -->
     <key>com.apple.security.app-sandbox</key>
