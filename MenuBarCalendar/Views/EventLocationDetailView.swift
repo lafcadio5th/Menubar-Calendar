@@ -50,6 +50,7 @@ struct EventLocationDetailView: View {
             }
         }
         .frame(width: popoverWidth)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: popoverWidth)
         .background(Color(nsColor: .windowBackgroundColor))
         .cornerRadius(12)
         .shadow(radius: 10)
@@ -141,7 +142,7 @@ struct EventLocationDetailView: View {
             }
             
             // Notes
-            if let notes = event.notes, !notes.isEmpty {
+            if let cleanNotes = event.cleanNotes, !cleanNotes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 12) {
                         Image(systemName: "text.alignleft")
@@ -153,7 +154,7 @@ struct EventLocationDetailView: View {
                         Spacer()
                     }
                     
-                    Text(notes)
+                    Text(cleanNotes)
                         .font(.system(size: 13))
                         .foregroundColor(.primary)
                         .padding(.leading, 32)
@@ -180,7 +181,7 @@ struct EventLocationDetailView: View {
                 }
             }
             
-            // 路線資訊摘要
+            // 路線資訊摘要（只在有路線資訊時顯示）
             if let multiRoute = routeInfo, let route = multiRoute.recommendedRoute {
                 VStack(alignment: .leading, spacing: 8) {
                     // 距離
@@ -206,7 +207,7 @@ struct EventLocationDetailView: View {
                 }
             }
             
-            // 展開地圖按鈕
+            // 展開地圖按鈕（只在有座標時顯示）
             if mapState == .hidden && event.locationCoordinate != nil {
                 Button(action: showMap) {
                     HStack {
@@ -222,6 +223,12 @@ struct EventLocationDetailView: View {
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.plain)
+            } else if mapState == .hidden && event.location != nil {
+                // 有地點但沒有座標時，顯示提示
+                Text("⚠️ 請重新選擇地點以啟用地圖功能")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+                    .padding(.vertical, 8)
             }
         }
     }

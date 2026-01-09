@@ -301,7 +301,7 @@ class CalendarViewModel: ObservableObject {
                     calendar: targetCalendar,
                     location: event.location,
                     url: event.url,
-                    notes: event.notes
+                    notes: event.notesWithCoordinate  // 使用編碼後的 notes（包含座標）
                 )
                 
                 await MainActor.run {
@@ -397,7 +397,11 @@ class CalendarViewModel: ObservableObject {
                 return nil
             }
             
-            return CalendarEvent(
+            // 從 notes 中解析座標
+            let extractedCoordinate = CalendarEvent.extractCoordinate(from: ekEvent.notes)
+            
+            // 創建事件時使用原始 notes（不含座標標記）
+            let event = CalendarEvent(
                 title: title,
                 date: calendar.startOfDay(for: startDate),
                 endDate: endDate,
@@ -405,12 +409,15 @@ class CalendarViewModel: ObservableObject {
                 color: colorForCalendar(ekEvent.calendar),
                 isAllDay: ekEvent.isAllDay,
                 location: ekEvent.location,
+                locationCoordinate: extractedCoordinate,  // 使用解析出的座標
                 url: ekEvent.url,
-                notes: ekEvent.notes,
+                notes: ekEvent.notes,  // 保留原始 notes（包含座標標記）
                 reminder: .none, // mapping reminder is complex, simplify for now
                 calendarId: ekEvent.calendar.calendarIdentifier,
                 ekEventId: ekEvent.eventIdentifier
             )
+            
+            return event
         }
         
         isLoadingEvents = false

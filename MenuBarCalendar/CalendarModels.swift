@@ -147,6 +147,51 @@ struct CalendarEvent: Identifiable, Codable {
         self.calendarId = calendarId
         self.ekEventId = ekEventId
     }
+    
+    // MARK: - Coordinate Encoding/Decoding
+    
+    /// 將座標編碼到 notes 中（用於 EventKit 持久化）
+    var notesWithCoordinate: String? {
+        var result = notes ?? ""
+        
+        if let coord = locationCoordinate {
+            let coordString = "\n[COORD:\(coord.latitude),\(coord.longitude)]"
+            // 移除舊的座標標記（如果有）
+            result = result.replacingOccurrences(of: #"\[COORD:[^\]]+\]"#, with: "", options: .regularExpression)
+            result += coordString
+        }
+        
+        return result.isEmpty ? nil : result
+    }
+    
+    /// 從 notes 中解析座標
+    static func extractCoordinate(from notes: String?) -> LocationCoordinate? {
+        guard let notes = notes else { return nil }
+        
+        let pattern = #"\[COORD:([0-9.-]+),([0-9.-]+)\]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: notes, range: NSRange(notes.startIndex..., in: notes)),
+              match.numberOfRanges == 3 else {
+            return nil
+        }
+        
+        let latRange = Range(match.range(at: 1), in: notes)!
+        let lonRange = Range(match.range(at: 2), in: notes)!
+        
+        guard let lat = Double(notes[latRange]),
+              let lon = Double(notes[lonRange]) else {
+            return nil
+        }
+        
+        return LocationCoordinate(latitude: lat, longitude: lon)
+    }
+    
+    /// 從 notes 中移除座標標記，返回乾淨的 notes
+    var cleanNotes: String? {
+        guard let notes = notes else { return nil }
+        let cleaned = notes.replacingOccurrences(of: #"\[COORD:[^\]]+\]"#, with: "", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
 }
 
 // MARK: - Color Extension for Hex

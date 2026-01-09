@@ -358,7 +358,7 @@ struct CalendarPopoverView: View {
                         Spacer()
                         
                         // 使用不同的視圖根據是否有地點
-                        if event.locationCoordinate != nil {
+                        if let location = event.location, !location.isEmpty {
                             EventLocationDetailViewWrapper(
                                 event: event,
                                 onClose: { withAnimation { selectedEvent = nil } },

@@ -23,6 +23,12 @@ struct LocationSearchField: View {
                 
                 TextField("地點（選填）", text: $searchText)
                     .textFieldStyle(.plain)
+                    .onSubmit {
+                        // 按 Enter 時自動選擇第一個建議
+                        if let firstSuggestion = suggestions.first {
+                            selectPlace(firstSuggestion)
+                        }
+                    }
                     .onChange(of: searchText) { oldValue, newValue in
                         if newValue.isEmpty {
                             suggestions = []
