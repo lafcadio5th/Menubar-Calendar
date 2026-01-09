@@ -12,6 +12,7 @@ struct AddEventView: View {
     @State private var endTime: Date = Date().addingTimeInterval(3600) // Default +1h
     @State private var isAllDay: Bool = false
     @State private var location: String = ""
+    @State private var locationCoordinate: LocationCoordinate? = nil
     @State private var urlString: String = ""
     @State private var notes: String = ""
     @State private var reminder: ReminderOption = .none
@@ -120,13 +121,13 @@ struct AddEventView: View {
                     
                     // Location
                     InputGroup(label: "地點") {
-                        HStack {
-                            Image(systemName: "mappin.and.ellipse").foregroundColor(.secondary)
-                            TextField("新增地點", text: $location)
-                                .textFieldStyle(.plain)
-                        }
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                        LocationSearchField(
+                            selectedLocation: Binding(
+                                get: { location.isEmpty ? nil : location },
+                                set: { location = $0 ?? "" }
+                            ),
+                            selectedCoordinate: $locationCoordinate
+                        )
                     }
                     
                     // URL
@@ -235,6 +236,7 @@ struct AddEventView: View {
             color: Color(cgColor: selectedCalendar?.cgColor ?? CGColor(red: 0, green: 0, blue: 1, alpha: 1)),
             isAllDay: isAllDay,
             location: location.isEmpty ? nil : location,
+            locationCoordinate: locationCoordinate,
             url: URL(string: urlString),
             notes: notes.isEmpty ? nil : notes,
             reminder: reminder,

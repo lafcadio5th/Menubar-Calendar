@@ -11,6 +11,17 @@ struct CalendarDay: Identifiable {
     let lunarDay: String
 }
 
+// MARK: - Location Coordinate
+struct LocationCoordinate: Codable, Equatable {
+    var latitude: Double
+    var longitude: Double
+    
+    init(latitude: Double, longitude: Double) {
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
 // MARK: - Reminder Option
 enum ReminderOption: String, CaseIterable, Codable {
     case none = "none"
@@ -68,7 +79,8 @@ struct CalendarEvent: Identifiable, Codable {
     var time: Date?
     var colorHex: String
     var isAllDay: Bool
-    var location: String? // New
+    var location: String? // 地點地址或名稱
+    var locationCoordinate: LocationCoordinate? // 地點座標
     var url: URL? // New
     var notes: String?
     var reminder: ReminderOption
@@ -107,6 +119,7 @@ struct CalendarEvent: Identifiable, Codable {
         color: Color,
         isAllDay: Bool,
         location: String? = nil,
+        locationCoordinate: LocationCoordinate? = nil,
         url: URL? = nil,
         notes: String?,
         reminder: ReminderOption,
@@ -127,6 +140,7 @@ struct CalendarEvent: Identifiable, Codable {
         self.colorHex = color.toHex() ?? "#007AFF"
         self.isAllDay = isAllDay
         self.location = location
+        self.locationCoordinate = locationCoordinate
         self.url = url
         self.notes = notes
         self.reminder = reminder
