@@ -102,6 +102,11 @@ struct GeneralSettingsTab: View {
     
     @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
     @AppStorage("showWeather") private var showWeather = false
+    @AppStorage("weatherStyle") private var weatherStyleRaw: String = WeatherStyle.realistic.rawValue
+    
+    // Temporary Debug Overrides
+    @AppStorage("debugWeatherCode") private var debugWeatherCode = -1
+    @AppStorage("debugTimeOfDay") private var debugTimeOfDay = 0
     
     var body: some View {
         Form {
@@ -134,9 +139,37 @@ struct GeneralSettingsTab: View {
                 Toggle("顯示天氣資訊", isOn: $showWeather)
                 
                 if showWeather {
+                    Picker("動畫風格", selection: $weatherStyleRaw) {
+                        ForEach(WeatherStyle.allCases) { style in
+                            Text(style.displayName).tag(style.rawValue)
+                        }
+                    }
+                    
                     Text("需要位置權限才能顯示天氣")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+            }
+            
+            if showWeather {
+                Section("動畫預覽 (暫時)") {
+                    Picker("預覽天氣", selection: $debugWeatherCode) {
+                        Text("目前真實天氣").tag(-1)
+                        Text("晴天").tag(0)
+                        Text("多雲").tag(1)
+                        Text("大霧").tag(45)
+                        Text("暴雨").tag(95)
+                    }
+                    
+                    Picker("時間形態", selection: $debugTimeOfDay) {
+                        Text("白天").tag(0)
+                        Text("黃昏").tag(1)
+                        Text("夜晚").tag(2)
+                    }
+                    
+                    Button("重置為真實天氣") {
+                        debugWeatherCode = -1
+                    }
                 }
             }
         }

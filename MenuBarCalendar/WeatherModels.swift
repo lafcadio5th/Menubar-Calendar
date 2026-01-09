@@ -90,3 +90,18 @@ extension WeatherData {
         }
     }
 }
+
+// MARK: - Weather Animation Style
+enum WeatherStyle: String, CaseIterable, Identifiable {
+    case realistic = "realistic"
+    case glassmorphic = "glassmorphic"
+    
+    var id: String { self.rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .realistic: return "擬真動畫"
+        case .glassmorphic: return "磨砂擬態"
+        }
+    }
+}

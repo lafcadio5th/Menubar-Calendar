@@ -6,21 +6,24 @@ import simd
 struct WeatherUniforms {
     var time: Float              // Offset 0
     var _pad1: Float = 0         // Offset 4
-    var resolution: SIMD2<Float> // Offset 8 (Align 8)
+    var resolution: SIMD2<Float> // Offset 8
     var weatherCode: Int32       // Offset 16
-    var timeOfDay: Int32         // Offset 20 (0:Day, 1:Sunset, 2:Night)
-    // 24 bytes total
+    var timeOfDay: Int32         // Offset 20
+    var style: Int32             // Offset 24 (0: Realistic, 1: Glassmorphic)
+    var _pad2: Int32 = 0         // Offset 28 (Padding to 32 bytes)
 }
 
 // MARK: - Metal Weather View Representable
 struct MetalWeatherView: NSViewRepresentable {
     let weatherCode: Int
     let timeOfDay: Int // Pass logic from parent
+    let style: WeatherStyle
     
     // Default int for generic usage, but parent should ideally control this
-    init(weatherCode: Int, timeOfDay: Int = 0) {
+    init(weatherCode: Int, timeOfDay: Int = 0, style: WeatherStyle = .realistic) {
         self.weatherCode = weatherCode
         self.timeOfDay = timeOfDay
+        self.style = style
     }
     
     func makeNSView(context: Context) -> MTKView {
@@ -41,7 +44,7 @@ struct MetalWeatherView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: MTKView, context: Context) {
-        context.coordinator.updateState(weatherCode: weatherCode, timeOfDay: timeOfDay)
+        context.coordinator.updateState(weatherCode: weatherCode, timeOfDay: timeOfDay, style: style)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -57,6 +60,7 @@ struct MetalWeatherView: NSViewRepresentable {
         var startTime: Date = Date()
         var currentWeatherCode: Int = 0
         var currentTimeOfDay: Int = 0
+        var currentStyle: WeatherStyle = .realistic
         
         let vertexData: [Float] = [
             -1.0, -1.0, 0.0, 1.0,
@@ -70,6 +74,7 @@ struct MetalWeatherView: NSViewRepresentable {
             self.parent = parent
             self.currentWeatherCode = parent.weatherCode
             self.currentTimeOfDay = parent.timeOfDay
+            self.currentStyle = parent.style
         }
         
         func setup(device: MTLDevice) {
@@ -102,9 +107,10 @@ struct MetalWeatherView: NSViewRepresentable {
             vertexBuffer = device.makeBuffer(bytes: vertexData, length: vertexData.count * 4, options: [])
         }
         
-        func updateState(weatherCode: Int, timeOfDay: Int) {
+        func updateState(weatherCode: Int, timeOfDay: Int, style: WeatherStyle) {
             self.currentWeatherCode = weatherCode
             self.currentTimeOfDay = timeOfDay
+            self.currentStyle = style
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -132,7 +138,8 @@ struct MetalWeatherView: NSViewRepresentable {
                 time: time,
                 resolution: SIMD2<Float>(width, height),
                 weatherCode: shaderCode,
-                timeOfDay: Int32(currentTimeOfDay)
+                timeOfDay: Int32(currentTimeOfDay),
+                style: Int32(currentStyle == .realistic ? 0 : 1)
             )
             
             let commandBuffer = commandQueue.makeCommandBuffer()
@@ -160,6 +167,7 @@ struct Uniforms {
     float2 resolution;
     int weatherCode; // 0:Sunny, 1:Cloudy, 2:Overcast, 3:Storm
     int timeOfDay;   // 0:Day, 1:Sunset, 2:Night
+    int style;       // 0:Realistic, 1:Glassmorphic
 };
 
 struct VertexOut {
@@ -200,6 +208,58 @@ float fbm(float2 p) {
 }
 
 // MARK: - Elements
+float sun(float2 uv, float aspect, float radius, float blur) {
+    float d = length(uv);
+    return smoothstep(radius + blur, radius, d);
+}
+
+// Enhanced Volumetric-like cloud rendering with cinematic shading
+float3 renderClouds(float2 uv, float time, float3 skyColor, float cloudDensity, float3 sunDir, float3 cloudColor, float3 shadowColor) {
+    float2 q = uv;
+    q.x += time * 0.02; 
+    
+    // Multi-layered complex noise for volumetric effect
+    float f = fbm(q * 2.5);
+    f += fbm(q * 5.0 + time * 0.01) * 0.5;
+    float density = fbm(q * 1.5 - time * 0.005);
+    f *= density * 1.2;
+    
+    // Calculate pseudo-normals for detail shading
+    float2 eps = float2(0.02, 0.0);
+    float f_x = fbm((q + eps.xy) * 2.5) - f;
+    float f_y = fbm((q + eps.yx) * 2.5) - f;
+    float3 normal = normalize(float3(f_x, f_y, 0.1));
+    
+    // Lighting model: Diffuse + Scattering + Silver Lining
+    float diffuse = clamp(dot(normal, sunDir), 0.0, 1.0);
+    // Silver lining effect near the sun
+    float scattering = pow(max(0.0, dot(normalize(float3(uv, 1.0)), sunDir)), 12.0);
+    
+    float cover = smoothstep(0.35, 0.85, f + cloudDensity);
+    
+    // Ambient + Diffuse
+    float3 col = mix(shadowColor, cloudColor, diffuse * 0.7 + 0.3);
+    // Add rim lighting / scattering
+    col += cloudColor * scattering * 1.2;
+    
+    // Micro-detail layer
+    float detail = fbm(q * 12.0 + time * 0.06);
+    col = mix(col, col * 1.15, detail * 0.4);
+    
+    return mix(skyColor, col, cover);
+}
+
+// Light scattering (God Rays)
+float3 godRays(float2 uv, float2 sunPos, float time, float3 color) {
+    float d = length(uv - sunPos);
+    float angle = atan2(uv.y - sunPos.y, uv.x - sunPos.x);
+    float rays = 0.0;
+    rays += sin(angle * 12.0 + time * 0.45) * 0.5 + 0.5;
+    rays *= sin(angle * 8.5 - time * 0.25) * 0.5 + 0.5;
+    rays *= pow(max(0.0, 1.0 - d * 0.6), 5.0);
+    return color * rays * 0.35;
+}
+
 float particles(float2 uv, float time, float speed, float size, float density) {
     float2 p = uv;
     p.y += time * speed;
@@ -213,121 +273,190 @@ float particles(float2 uv, float time, float speed, float size, float density) {
     }
     return 0.0;
 }
-float sun(float2 uv, float aspect, float radius, float blur) {
-    float d = length(uv);
-    return smoothstep(radius + blur, radius, d);
-}
-float3 renderClouds(float2 uv, float time, float3 skyColor, float cloudDensity, float3 sunDir, float3 cloudColor, float3 shadowColor) {
-    float2 q = uv;
-    q.x += time * 0.03; 
-    float f = fbm(q * 3.0);
-    float2 eps = float2(0.01, 0.0);
-    float nx = fbm((q + eps.xy) * 3.0) - f;
-    float ny = fbm((q + eps.yx) * 3.0) - f;
-    float3 normal = normalize(float3(nx, ny, 1.0));
-    float diffuse = max(0.0, dot(normal, sunDir));
-    float rim = pow(1.0 - normal.z, 3.0);
-    float cover = smoothstep(0.4, 0.8, f + cloudDensity);
-    
-    float3 col = mix(shadowColor, cloudColor, diffuse * 0.8 + 0.2);
-    // Add rim lighting
-    col += vector_float3(0.8, 0.8, 1.0) * rim * 0.6; // Blueish rim for night clouds
-    
-    return mix(skyColor, col, cover);
-}
+
 float lightning(float2 uv, float time) {
-    float t = time * 2.0;
+    float t = time * 2.1;
     float flash = sin(t) * sin(t * 3.7) * sin(t * 11.3);
-    return smoothstep(0.98, 1.0, flash);
+    return smoothstep(0.985, 1.0, flash);
+}
+
+// Premium Heat Haze / Thermal Distortion
+float2 applyHeatHaze(float2 uv, float time, float intensity) {
+    float distortion = fbm(uv * 4.0 + time * 0.8);
+    distortion += fbm(uv * 8.0 - time * 1.2) * 0.5;
+    return uv + (distortion - 0.5) * intensity;
+}
+
+// Extra cinematic lens flare for direct sun (MEGA BOOST)
+float3 lensFlare(float2 uv, float2 sunPos, float3 color) {
+    float3 flare = float3(0.0);
+    float2 mainDir = uv - sunPos;
+    
+    // Main Ghost 1 (Brighter)
+    float d1 = length(uv - (sunPos - mainDir * 0.5));
+    flare += color * smoothstep(0.25, 0.0, d1) * 0.4;
+    
+    // Main Ghost 2 (Larger)
+    float d2 = length(uv - (sunPos + mainDir * 1.2));
+    flare += color * 0.6 * smoothstep(0.15, 0.0, d2) * 0.3;
+    
+    // Rainbow ring effect
+    float ring = smoothstep(0.5, 0.48, length(mainDir)) * smoothstep(0.45, 0.47, length(mainDir));
+    flare += float3(0.1, 0.2, 0.5) * ring * 0.3;
+    
+    // Tiny bright specs (Sharper)
+    float spec = pow(max(0.0, 1.0 - length(mainDir * 3.0)), 30.0);
+    flare += color * spec * 1.5;
+    
+    return flare;
 }
 
 // MARK: - Fragment
 fragment float4 weatherFragment(VertexOut in [[stage_in]], constant Uniforms &uniforms [[buffer(0)]]) {
-    float2 uv = in.uv;
+    float2 rawUV = in.uv;
+    float time = uniforms.time;
+    int code = uniforms.weatherCode;
+    int style = uniforms.style;
+    
+    // Apply Heat Haze distortion to UVs if it's Sunny/Clear
+    float2 uv = (code == 0 && style == 0) ? applyHeatHaze(rawUV, time, 0.015) : rawUV;
+    
     float aspect = uniforms.resolution.x / uniforms.resolution.y;
     float2 st = uv * 2.0 - 1.0;
     st.x *= aspect; st.y = -st.y;
     
-    float time = uniforms.time;
-    int code = uniforms.weatherCode;
     int timeOfDay = uniforms.timeOfDay;
-    
+
     float3 col = float3(0.0);
     float3 sunDir = normalize(float3(0.5, 0.5, 1.0));
     
-    // Define Palettes
+    // Refined High-End Palettes
     float3 skyTop, skyBot;
     float3 cloudBase, cloudShadow;
     
     if (timeOfDay == 2) { // Night
-        skyTop = float3(0.02, 0.03, 0.1);  // Slightly lighter dark blue
-        skyBot = float3(0.08, 0.12, 0.25); // Lighter gradient bottom
-        
-        // Fix: Make clouds lighter and more blue-greyish, not black
-        cloudBase = float3(0.5, 0.55, 0.65); // Moonlit cloud distinct grey
-        cloudShadow = float3(0.15, 0.18, 0.25); // Dark blue-ish shadow
-        
+        skyTop = float3(0.01, 0.02, 0.08); 
+        skyBot = float3(0.04, 0.08, 0.2);
+        cloudBase = float3(0.4, 0.45, 0.6);
+        cloudShadow = float3(0.04, 0.06, 0.12);
     } else if (timeOfDay == 1) { // Sunset
-        skyTop = float3(0.15, 0.1, 0.35);
-        skyBot = float3(1.0, 0.5, 0.2);
-        cloudBase = float3(1.0, 0.8, 0.7); 
-        cloudShadow = float3(0.4, 0.25, 0.35);
+        skyTop = float3(0.1, 0.08, 0.25);
+        skyBot = float3(1.0, 0.4, 0.2);
+        cloudBase = float3(1.0, 0.7, 0.55); 
+        cloudShadow = float3(0.3, 0.1, 0.2);
     } else { // Day
-        skyTop = float3(0.2, 0.5, 0.9);
-        skyBot = float3(0.5, 0.7, 1.0);
-        cloudBase = float3(0.98, 0.98, 1.0);
-        cloudShadow = float3(0.65, 0.7, 0.8);
+        skyTop = float3(0.05, 0.5, 1.0); // Deeper top
+        skyBot = float3(0.6, 0.85, 1.0); // Brighter bottom
+        cloudBase = float3(1.0, 1.0, 1.0);
+        cloudShadow = float3(0.7, 0.8, 0.95);
     }
 
-    if (code == 0) { // Clear
+    if (style == 1) { // Glassmorphic Style (RESTORED DETAIL)
         col = mix(skyTop, skyBot, uv.y);
-        if (timeOfDay == 0) { // Sunny
-            float2 sunPos = st - float2(0.6, 0.5);
-            float sunCore = sun(sunPos, aspect, 0.15, 0.05);
-            float sunGlow = sun(sunPos, aspect, 0.5, 0.5);
-            col += float3(1.0, 0.9, 0.6) * sunGlow * 0.6;
-            col += float3(1.0, 1.0, 0.9) * sunCore;
-            col = renderClouds(st, time, col, -0.4, sunDir, cloudBase, cloudShadow);
-        } else if (timeOfDay == 1) { // Sunset
-            float2 sunPos = st - float2(0.0, -0.3);
-            float sunCore = sun(sunPos, aspect, 0.2, 0.1);
-            col += float3(1.0, 0.6, 0.2) * sunCore;
-            col = renderClouds(st, time, col, -0.1, sunDir, cloudBase, cloudShadow);
-        } else { // Night
-            float starField = particles(st, time * 0.05, 0.0, 1.0, 50.0);
-            starField *= (0.5 + 0.5 * sin(time * 5.0 + st.x * 10.0));
-            col += float3(1.0) * starField;
-            
-            float2 moonPos = st - float2(0.5, 0.4);
-            float moon = sun(moonPos, aspect, 0.12, 0.01);
-            float crater = fbm(moonPos * 10.0);
-            moon *= (0.9 + 0.1 * crater);
-            col += float3(0.9, 0.95, 1.0) * moon;
-            // Night Clouds
-            col = renderClouds(st, time, col, -0.2, sunDir, cloudBase, cloudShadow);
+        
+        if (code == 0) { // Sunny/Clear: Vibrant & Glowing
+             float2 sunPos = st - float2(0.6 * aspect, 0.45);
+             float sunGlow = smoothstep(1.3, 0.0, length(sunPos));
+             col += float3(1.0, 0.8, 0.2) * sunGlow * 0.5;
+             
+             // Bokeh light leaks
+             float2 p1 = st - float2(-0.4 + sin(time*0.2)*0.1, 0.2);
+             float2 p2 = st - float2(0.3, -0.4 + cos(time*0.15)*0.2);
+             col += float3(1.0, 0.9, 0.6) * smoothstep(1.0, 0.0, length(p1)) * 0.15;
+             col += float3(1.0, 0.8, 0.7) * smoothstep(0.8, 0.0, length(p2)) * 0.12;
+             
+        } else if (code == 1) { // Cloudy: Multi-layered soft drift
+             float2 p1 = st - float2(sin(time*0.3)*0.4 - 0.3, 0.4);
+             float2 p2 = st - float2(cos(time*0.2)*0.3 + 0.4, 0.2);
+             float2 p3 = st - float2(sin(time*0.1)*0.2, 0.6);
+             col = mix(col, float3(1.0), smoothstep(1.2, 0.2, length(p1)) * 0.25);
+             col = mix(col, float3(0.9, 0.95, 1.0), smoothstep(0.9, 0.0, length(p2)) * 0.2);
+             col = mix(col, float3(0.95, 0.98, 1.0), smoothstep(0.7, 0.0, length(p3)) * 0.15);
+             
+        } else if (code == 2) { // Overcast/Fog: Heavy blur
+             col *= 0.8;
+             float2 p1 = st - float2(0.0, 0.3 + sin(time*0.1)*0.1);
+             float f = fbm(st * 1.5 + time * 0.05);
+             col = mix(col, float3(0.7, 0.75, 0.8), (smoothstep(1.8, 0.0, length(p1)) + f * 0.5) * 0.5);
+             
+        } else if (code == 3) { // Storm: Moody & Dynamic streaks
+             col = mix(float3(0.05, 0.05, 0.15), float3(0.15, 0.1, 0.3), uv.y);
+             float flash = lightning(uv, time);
+             col += float3(0.7, 0.85, 1.0) * flash * 0.5;
+             
+             // Abstract Rain Streaks
+             float rain = particles(st * float2(2.0, 0.05), time * 1.5, 4.0, 40.0, 30.0);
+             col += float3(0.5, 0.7, 1.0) * rain * 0.25;
+             
+             float2 p1 = st - float2(0.0, 0.4);
+             col = mix(col, float3(0.2, 0.2, 0.45), smoothstep(1.5, 0.0, length(p1)) * 0.4);
         }
-    } else if (code == 1) { // Cloudy
-        col = mix(skyTop * 0.9, skyBot * 0.9, uv.y);
-        col = renderClouds(st, time, col, 0.3, sunDir, cloudBase, cloudShadow);
-        if (timeOfDay == 2) {
-             float starField = particles(st, time * 0.05, 0.0, 1.0, 50.0);
-             col += float3(1.0) * starField * 0.2; // Faint stars behind clouds
+        float grain = hash(uv + time) * 0.05;
+        col += grain;
+        
+    } else { // Realistic Style (UPGRADED TO CINEMATIC)
+        if (code == 0) { // Clear
+            col = mix(skyTop, skyBot, uv.y);
+            if (timeOfDay == 0) { // Sunny Day: ULTRA BLINDING
+                float2 sunPos = float2(0.6 * aspect, 0.5);
+                float2 sunUV = st - sunPos;
+                
+                // 1. Intense Blinding Sun Core (MEGA BOOST)
+                float sunCore = sun(sunUV, aspect, 0.08, 0.01);
+                float sunSpike = pow(max(0.0, 1.0 - length(sunUV * 2.2)), 80.0) * 4.0;
+                float sunGlow = sun(sunUV, aspect, 1.2, 0.6);
+                
+                col += float3(1.0, 0.95, 0.7) * sunGlow * 1.0;
+                col += float3(1.0, 1.0, 1.0) * (sunCore * 2.0 + sunSpike);
+                
+                // 2. Extra Cinematic Lens Flare (NEW)
+                col += lensFlare(st, sunPos, float3(1.0, 0.9, 0.8));
+                
+                // 3. Sharper God Rays (BOOSTED)
+                col += godRays(st, sunPos, time, float3(1.0, 1.0, 0.9)) * 1.8;
+                
+                // 4. Atmospheric Glare
+                col = renderClouds(st, time, col, -0.45, sunDir, cloudBase, cloudShadow);
+                col += float3(0.2, 0.1, 0.0) * sunGlow * 0.5; // Direct glare tint
+                
+            } else if (timeOfDay == 1) { // Sunset
+                float2 sunPos = float2(0.0, -0.4);
+                float2 sunUV = st - sunPos;
+                float sunCore = sun(sunUV, aspect, 0.25, 0.1);
+                col += float3(1.0, 0.5, 0.15) * sunCore;
+                col += godRays(st, sunPos, time, float3(1.0, 0.35, 0.1));
+                
+                col = renderClouds(st, time, col, -0.15, sunDir, cloudBase, cloudShadow);
+            } else { // Night
+                float starField = particles(st, time * 0.04, 0.0, 0.7, 65.0);
+                starField *= (0.4 + 0.6 * sin(time * 3.5 + hash(st * 100.0) * 6.28));
+                col += float3(0.9, 0.95, 1.0) * starField;
+                
+                float2 moonPos = float2(0.5, 0.45);
+                float moon = sun(st - moonPos, aspect, 0.09, 0.015);
+                col += float3(0.85, 0.9, 1.0) * moon;
+                col += godRays(st, moonPos, time * 0.2, float3(0.4, 0.5, 0.75)) * 0.25;
+                
+                col = renderClouds(st, time, col, -0.25, sunDir, cloudBase, cloudShadow);
+            }
+        } else if (code == 1) { // Cloudy
+            col = mix(skyTop * 0.85, skyBot * 0.85, uv.y);
+            col = renderClouds(st, time, col, 0.2, sunDir, cloudBase, cloudShadow);
+        } else if (code == 2) { // Overcast/Fog
+            col = mix(skyTop * 0.6, skyBot * 0.6, uv.y);
+            col = renderClouds(st, time, col, 0.5, sunDir, cloudBase * 0.85, cloudShadow * 0.9);
+        } else if (code == 3) { // Storm
+             col = mix(float3(0.04, 0.04, 0.05), float3(0.08, 0.08, 0.15), uv.y); 
+             float flash = lightning(uv, time);
+             col += float3(0.85, 0.9, 1.0) * flash * 0.5;
+             col = renderClouds(st, time * 1.6, col, 0.4, sunDir, cloudBase * 0.45, cloudShadow * 0.4);
+             float rain = particles(st * float2(1.0, 0.1), time, 6.0, 15.0, 50.0);
+             col += float3(0.6, 0.75, 1.0) * rain * 0.45;
         }
-    } else if (code == 2) { // Overcast/Fog
-        col = mix(skyTop * 0.7, skyBot * 0.7, uv.y);
-        col = renderClouds(st, time, col, 0.6, sunDir, cloudBase, cloudShadow);
-    } else if (code == 3) { // Storm
-         col = mix(float3(0.05), float3(0.1, 0.1, 0.15), uv.y); 
-         float flash = lightning(uv, time);
-         col += float3(0.8, 0.9, 1.0) * flash * 0.4;
-         col = renderClouds(st, time * 2.0, col, 0.5, sunDir, cloudBase * 0.5, cloudShadow * 0.5);
-         float rain = particles(st * float2(1.0, 0.1), time, 5.0, 20.0, 40.0);
-         col += float3(0.7, 0.8, 1.0) * rain * 0.4;
     }
 
     col = smoothstep(0.0, 1.0, col);
-    // Reduced vignette intensity for better visibility
-    float vig = 1.0 - length(in.uv - 0.5) * 0.4;
+    float vig = 1.0 - length(in.uv - 0.5) * 0.35;
     col *= vig;
     
     return float4(col, 1.0);

@@ -10,6 +10,9 @@ struct CalendarPopoverView: View {
     @AppStorage("showLunarCalendar") private var showLunarCalendar = false
     @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
     @AppStorage("showFestiveEffects") private var showFestiveEffects = true
+    @AppStorage("weatherStyle") private var weatherStyleRaw: String = WeatherStyle.realistic.rawValue
+    @AppStorage("debugWeatherCode") private var debugWeatherCode = -1
+    @AppStorage("debugTimeOfDay") private var debugTimeOfDay = 0
     @AppStorage("demoFestival") var demoFestivalRaw: String = Festival.none.rawValue
     
     var appTheme: AppTheme {
@@ -54,12 +57,14 @@ struct CalendarPopoverView: View {
     @AppStorage("showWeather") private var showWeather = false
     
     // MARK: - Dynamic Text Color
-    private func weatherTextColor(for weatherCode: Int) -> Color {
+    private func weatherTextColor(for weatherCode: Int, time: Int? = nil) -> Color {
         // If weather is disabled, always use primary color
         if !showWeather { return .primary }
         
+        let t = time ?? currentTimeOfDay
+        
         // Night (2) or Sunset (1) generally use dark-themed weather animations -> White text
-        if currentTimeOfDay == 2 || currentTimeOfDay == 1 { return .white }
+        if t == 2 || t == 1 { return .white }
         
         // Day time (0) logic
         switch weatherCode {
@@ -72,18 +77,16 @@ struct CalendarPopoverView: View {
             return .white
         default:
             // Fallback for other day-time weathers (e.g. snow, if not covered)
-            // If they are likely bright, use dark. If dark, use white.
-            // Snow (71-77) is usually bright -> Dark text
             if weatherCode >= 71 && weatherCode <= 77 { return Color(red: 0.05, green: 0.05, blue: 0.1) }
             return .primary
         }
     }
     
-    private func weatherSecondaryTextColor(for weatherCode: Int) -> Color {
+    private func weatherSecondaryTextColor(for weatherCode: Int, time: Int? = nil) -> Color {
         // If weather is disabled, use secondary color
         if !showWeather { return .secondary }
         
-        let baseColor = weatherTextColor(for: weatherCode)
+        let baseColor = weatherTextColor(for: weatherCode, time: time)
         // If base is dark (the near-black we defined), return a muted version of it
         if baseColor != .white && baseColor != .primary {
             return baseColor.opacity(0.6)
@@ -93,9 +96,12 @@ struct CalendarPopoverView: View {
     
     // Helper for header color to avoid ViewBuilder syntax issues
     private var headerColor: Color {
-        if let weather = viewModel.currentWeather {
-            // Using full opacity for better contrast on weather backgrounds
-            return weatherTextColor(for: weather.weatherCode)
+        let weather = viewModel.currentWeather
+        let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
+        let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
+        
+        if showWeather {
+             return weatherTextColor(for: actualWeatherCode, time: actualTimeOfDay)
         } else {
             return .secondary
         }
@@ -107,20 +113,28 @@ struct CalendarPopoverView: View {
             // ========== Unified Header Box (Weather Bg + Info + Weekdays) ==========
             ZStack(alignment: .top) {
                 // 1. Weather Background Layer
-                if showWeather, let weather = viewModel.currentWeather {
-                    WeatherAnimationView(weatherCode: weather.weatherCode, timeOfDay: currentTimeOfDay)
+                if showWeather {
+                    let weather = viewModel.currentWeather
+                    let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
+                    let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
+                    
+                    WeatherAnimationView(
+                        weatherCode: actualWeatherCode,
+                        timeOfDay: actualTimeOfDay,
+                        style: WeatherStyle(rawValue: weatherStyleRaw) ?? .realistic
+                    )
                         .frame(height: 110) // Bleed down behind grid
                         .frame(maxWidth: .infinity)
-
                 }
                 
                 // 2. Content Layer (Info Row + Navigation Row + Weekday Row)
                 VStack(spacing: 0) {
                     let weather = viewModel.currentWeather
-                    // If weather contains data, use its code. Otherwise default to clear day (0) but showWeather flag handles color fallback
-                    let weatherCode = weather?.weatherCode ?? 0
-                    let textColor = weatherTextColor(for: weatherCode)
-                    let secondaryColor = weatherSecondaryTextColor(for: weatherCode)
+                    // Override with debug settings if active
+                    let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
+                    let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
+                    let textColor = weatherTextColor(for: actualWeatherCode, time: actualTimeOfDay)
+                    let secondaryColor = weatherSecondaryTextColor(for: actualWeatherCode, time: actualTimeOfDay)
                     
                     // Row 1: Date & Weather (Height 32)
                     HStack(alignment: .center) {
