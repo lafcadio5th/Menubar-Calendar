@@ -5,6 +5,8 @@ import EventKit
 struct AddEventView: View {
     @ObservedObject var viewModel: CalendarViewModel
     @Binding var isPresented: Bool
+    var editingEvent: CalendarEvent? = nil // 新增編輯屬性
+    
     @AppStorage("defaultReminderTime") private var defaultReminderTime = 15
     
     @State private var title: String = ""
@@ -29,10 +31,10 @@ struct AddEventView: View {
                     .foregroundColor(.accentColor)
                 
                 Spacer()
-                Text("新增事件").font(.system(size: 14, weight: .semibold))
+                Text(editingEvent == nil ? "新增事件" : "編輯事件").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 
-                Button("加入") { addEvent() }
+                Button(editingEvent == nil ? "加入" : "儲存") { addEvent() }
                     .buttonStyle(.plain)
                     .foregroundColor(title.isEmpty ? .secondary : .accentColor)
                     .disabled(title.isEmpty)
@@ -179,6 +181,21 @@ struct AddEventView: View {
     }
     
     private func initializeDefaults() {
+        if let event = editingEvent {
+            // Pre-fill data from existing event
+            title = event.title
+            isAllDay = event.isAllDay
+            selectedTime = event.time ?? event.date
+            endTime = event.endDate
+            location = event.location ?? ""
+            locationCoordinate = event.locationCoordinate
+            urlString = event.url?.absoluteString ?? ""
+            notes = event.cleanNotes ?? ""
+            reminder = event.reminder
+            selectedCalendarId = event.calendarId ?? ""
+            return
+        }
+        
         reminder = ReminderOption.fromMinutes(defaultReminderTime)
         
         let visibleCalendars = viewModel.availableCalendars.filter { viewModel.isCalendarVisible($0) }
@@ -211,17 +228,17 @@ struct AddEventView: View {
         // Construct dates
         let calendar = Calendar.current
         // Determine final start date with component
-        var finalStartDate = viewModel.selectedDate
-        var finalEndDate = viewModel.selectedDate
+        var finalStartDate = editingEvent?.date ?? viewModel.selectedDate
+        var finalEndDate = editingEvent?.date ?? viewModel.selectedDate
         
         if !isAllDay {
             // Combine selected date with time components
-            finalStartDate = combineDateTime(date: viewModel.selectedDate, time: selectedTime)
+            finalStartDate = combineDateTime(date: finalStartDate, time: selectedTime)
             
             // For end date, if user picked a time that is "before" start time in clock terms (e.g. 11PM start, 1AM end),
             // we assume it means next day. But here we just combine.
             // A simpler approach: create both dates today. If end < start, add 1 day to end.
-            var endCombined = combineDateTime(date: viewModel.selectedDate, time: endTime)
+            var endCombined = combineDateTime(date: finalStartDate, time: endTime)
             if endCombined < finalStartDate {
                 endCombined = calendar.date(byAdding: .day, value: 1, to: endCombined)!
             }
@@ -230,7 +247,7 @@ struct AddEventView: View {
         
         let event = CalendarEvent(
             title: title,
-            date: viewModel.selectedDate, // We pass base date, let VM handle logic or pass full Dates?
+            date: finalStartDate,
             endDate: finalEndDate,
             time: isAllDay ? nil : selectedTime,
             color: Color(cgColor: selectedCalendar?.cgColor ?? CGColor(red: 0, green: 0, blue: 1, alpha: 1)),
@@ -243,13 +260,12 @@ struct AddEventView: View {
             calendarId: selectedCalendarId
         )
         
-        // NOTE: Our VM.addEvent logic currently RE-CALCULATES dates based on `event.time`.
-        // We should probably update VM to respect pre-calculated dates if we pass them.
-        // Or we trust VM's combineDateTime logic.
-        // But `endTime` is not passed to VM properly yet because `CalendarEvent` init takes `endDate`.
-        // My previous VM update uses `event.endDate`. So we are good if we pass it correctly.
+        if let oldEvent = editingEvent {
+            viewModel.updateEvent(oldEvent: oldEvent, newEvent: event)
+        } else {
+            viewModel.addEvent(event)
+        }
         
-        viewModel.addEvent(event)
         isPresented = false
     }
     

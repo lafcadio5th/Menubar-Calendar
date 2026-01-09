@@ -314,6 +314,55 @@ class CalendarViewModel: ObservableObject {
         }
     }
     
+    func updateEvent(oldEvent: CalendarEvent, newEvent: CalendarEvent) {
+        guard let ekEventId = oldEvent.ekEventId else { return }
+        
+        Task {
+            do {
+                let calendar = Calendar.current
+                var startDate: Date
+                var endDate: Date
+                
+                if newEvent.isAllDay {
+                    startDate = calendar.startOfDay(for: newEvent.date)
+                    endDate = calendar.date(byAdding: .day, value: 1, to: startDate)!
+                } else if let time = newEvent.time {
+                    let start = combineDateTime(date: newEvent.date, time: time)
+                    if newEvent.endDate > start {
+                        endDate = newEvent.endDate
+                    } else {
+                        endDate = calendar.date(byAdding: .hour, value: 1, to: start)!
+                    }
+                    startDate = start
+                } else {
+                    startDate = calendar.startOfDay(for: newEvent.date)
+                    endDate = calendar.date(byAdding: .hour, value: 1, to: startDate)!
+                }
+                
+                // Get target calendar
+                let targetCalendar = availableCalendars.first { $0.calendarIdentifier == newEvent.calendarId }
+                
+                try eventKitService.updateEvent(
+                    identifier: ekEventId,
+                    title: newEvent.title,
+                    startDate: startDate,
+                    endDate: endDate,
+                    isAllDay: newEvent.isAllDay,
+                    calendar: targetCalendar,
+                    location: newEvent.location,
+                    url: newEvent.url,
+                    notes: newEvent.notesWithCoordinate
+                )
+                
+                await MainActor.run {
+                    loadEventsFromEventKit()
+                }
+            } catch {
+                print("無法更新事件: \(error)")
+            }
+        }
+    }
+    
     func deleteEvent(_ event: CalendarEvent) {
         Task {
             if let ekEventId = event.ekEventId {

@@ -24,6 +24,14 @@ struct CalendarPopoverView: View {
     }
     
     @State private var selectedEvent: CalendarEvent? = nil
+    @State private var currentPopoverWidth: CGFloat = 340
+    
+    private func closeEvent() {
+        withAnimation(.spring()) {
+            selectedEvent = nil
+            currentPopoverWidth = 340
+        }
+    }
     
     private var weekdays: [String] {
         if startWeekOnMonday {
@@ -50,13 +58,24 @@ struct CalendarPopoverView: View {
         // If weather is disabled, always use primary color
         if !showWeather { return .primary }
         
-        if currentTimeOfDay == 2 { return .white } // Night
+        // Night (2) or Sunset (1) generally use dark-themed weather animations -> White text
+        if currentTimeOfDay == 2 || currentTimeOfDay == 1 { return .white }
+        
+        // Day time (0) logic
         switch weatherCode {
-        case 51...65, 80...82, 95...99: // Rain/Storm
+        case 0, 1, 2, 3, 45, 48: 
+            // Clear, Cloudy, Fog are BRIGHT backgrounds. 
+            // We use dark text even if system is in dark mode.
+            return Color(red: 0.05, green: 0.05, blue: 0.1) // Near black with slight blue tint
+        case 51...65, 80...82, 95...99: 
+            // Rain/Storm backgrounds are DARK/GREY -> White text
             return .white
         default:
-            if currentTimeOfDay == 1 { return .white } // Sunset
-            return Color.primary
+            // Fallback for other day-time weathers (e.g. snow, if not covered)
+            // If they are likely bright, use dark. If dark, use white.
+            // Snow (71-77) is usually bright -> Dark text
+            if weatherCode >= 71 && weatherCode <= 77 { return Color(red: 0.05, green: 0.05, blue: 0.1) }
+            return .primary
         }
     }
     
@@ -65,13 +84,18 @@ struct CalendarPopoverView: View {
         if !showWeather { return .secondary }
         
         let baseColor = weatherTextColor(for: weatherCode)
-        return baseColor == .white ? Color.white.opacity(0.85) : Color.secondary
+        // If base is dark (the near-black we defined), return a muted version of it
+        if baseColor != .white && baseColor != .primary {
+            return baseColor.opacity(0.6)
+        }
+        return baseColor == .white ? Color.white.opacity(0.8) : Color.secondary
     }
     
     // Helper for header color to avoid ViewBuilder syntax issues
     private var headerColor: Color {
         if let weather = viewModel.currentWeather {
-            return weatherTextColor(for: weather.weatherCode).opacity(0.9)
+            // Using full opacity for better contrast on weather backgrounds
+            return weatherTextColor(for: weather.weatherCode)
         } else {
             return .secondary
         }
@@ -127,8 +151,8 @@ struct CalendarPopoverView: View {
                     HStack(spacing: 0) {
                         Button(action: { viewModel.previousMonth() }) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(textColor == .white ? .white : .blue)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(textColor)
                                 .frame(width: 28, height: 28)
                                 .contentShape(Rectangle())
                         }
@@ -138,15 +162,15 @@ struct CalendarPopoverView: View {
                         
                         Button("今天") { viewModel.goToToday() }
                             .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(textColor == .white ? Color.white.opacity(0.9) : .blue)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(textColor)
                         
                         Spacer()
                         
                         Button(action: { viewModel.nextMonth() }) {
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(textColor == .white ? .white : .blue)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(textColor)
                                 .frame(width: 28, height: 28)
                                 .contentShape(Rectangle())
                         }
@@ -176,7 +200,7 @@ struct CalendarPopoverView: View {
                         }
                         ForEach(weekdays, id: \.self) { day in
                             Text(day)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 12, weight: .semibold)) // Increased weight for contrast
                                 .foregroundColor(headerColor)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 30)
@@ -185,7 +209,8 @@ struct CalendarPopoverView: View {
                     .frame(height: 30)
                 }
                 .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 10) // 指令：靠下對齊，並且距離紅線 10px
+                .padding(.bottom, 5) // 將整組資訊往下移動 5px (原為 10px)
+                .shadow(color: Color.black.opacity(0.4), radius: 2, x: 0, y: 1)
             }
             .frame(height: 110) // 指令：Header 高度鎖死
                 Divider()
@@ -340,37 +365,36 @@ struct CalendarPopoverView: View {
                 }
             }
             .background(Color(NSColor.windowBackgroundColor))
-            .zIndex(1)
         }
-        .frame(width: 340, height: 650)
+        .frame(minWidth: 340, maxWidth: .infinity)
+        .frame(width: currentPopoverWidth, height: 650)
         .zIndex(1)
         .background(Color(NSColor.windowBackgroundColor))
         .preferredColorScheme(appTheme.colorScheme)
         .overlay(
             ZStack {
-                if showFestiveEffects && currentFestival != .none {
-                    FestivalDecorationView(festival: currentFestival)
-                }
-                
                 if let event = selectedEvent {
-                    Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { withAnimation { selectedEvent = nil } }
+                    Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { closeEvent() }
                     VStack {
                         Spacer()
                         
                         // 使用不同的視圖根據是否有地點
                         if let location = event.location, !location.isEmpty {
                             EventLocationDetailViewWrapper(
+                                viewModel: viewModel,
                                 event: event,
-                                onClose: { withAnimation { selectedEvent = nil } },
-                                onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
+                                popoverWidth: $currentPopoverWidth,
+                                onClose: { closeEvent() },
+                                onDelete: { withAnimation { viewModel.deleteEvent(event); closeEvent() } }
                             )
                             .transition(.move(edge: .bottom))
                             .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
                         } else {
                             EventDetailView(
+                                viewModel: viewModel,
                                 event: event,
-                                onClose: { withAnimation { selectedEvent = nil } },
-                                onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
+                                onClose: { closeEvent() },
+                                onDelete: { withAnimation { viewModel.deleteEvent(event); closeEvent() } }
                             )
                             .frame(height: 480)
                             .transition(.move(edge: .bottom))
@@ -474,7 +498,9 @@ struct VisualEffectBlur: NSViewRepresentable {
 
 // MARK: - Event Location Detail View Wrapper
 struct EventLocationDetailViewWrapper: View {
+    @ObservedObject var viewModel: CalendarViewModel
     let event: CalendarEvent
+    @Binding var popoverWidth: CGFloat
     var onClose: () -> Void
     var onDelete: () -> Void
     
@@ -482,10 +508,12 @@ struct EventLocationDetailViewWrapper: View {
     
     var body: some View {
         EventLocationDetailView(
+            viewModel: viewModel,
             event: event,
             routeInfo: routeViewModel.routeInfo,
             onClose: onClose,
-            onDelete: onDelete
+            onDelete: onDelete,
+            popoverWidth: $popoverWidth
         )
         .onAppear {
             // Calculate route if event has location

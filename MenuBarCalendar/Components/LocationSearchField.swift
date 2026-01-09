@@ -125,6 +125,7 @@ struct LocationSearchField: View {
             return
         }
         
+        print("📍 LocationSearchField: Starting search for '\(query)'")
         isSearching = true
         
         Task {
@@ -134,6 +135,7 @@ struct LocationSearchField: View {
                     suggestions = Array(results.prefix(5)) // 最多顯示 5 個建議
                     showSuggestions = !results.isEmpty
                     isSearching = false
+                    print("📍 LocationSearchField: Displaying \(suggestions.count) suggestions, showSuggestions=\(showSuggestions)")
                 }
             } catch {
                 await MainActor.run {
@@ -141,7 +143,6 @@ struct LocationSearchField: View {
                     showSuggestions = false
                     isSearching = false
                 }
-                print("Search error: \(error.localizedDescription)")
             }
         }
     }

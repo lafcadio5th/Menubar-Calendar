@@ -15,9 +15,7 @@ class MapService {
     /// - Parameter query: 搜尋關鍵字（地址或地點名稱）
     /// - Returns: 搜尋結果列表
     func searchPlace(query: String) async throws -> [MKMapItem] {
-        guard !query.isEmpty else {
-            throw MapServiceError.emptyQuery
-        }
+        guard !query.isEmpty else { return [] }
         
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
@@ -97,35 +95,64 @@ class MapService {
     ) async throws -> NSImage {
         let options = MKMapSnapshotter.Options()
         
-        // 設定地圖區域（包含整條路線）
-        let rect = route.polyline.boundingMapRect
-        let insets = NSEdgeInsets(top: 50, left: 50, bottom: 50, right: 50)
-        options.mapRect = rect
-        options.size = size
+        // 設定顯示區域，使用 MKCoordinateRegion 更好控制縮放係數
+        let mapRect = route.polyline.boundingMapRect
+        var region = MKCoordinateRegion(mapRect)
         
-        // 設定地圖類型
-        options.mapType = .standard
+        // 增加 50% 的邊距（Span 乘以 1.5），確保路線不會貼邊
+        region.span.latitudeDelta *= 1.5
+        region.span.longitudeDelta *= 1.5
+        
+        // 使用 2x 尺寸進行渲染
+        let renderSize = CGSize(width: size.width * 2, height: size.height * 2)
+        options.region = region
+        options.size = renderSize
+        options.appearance = NSAppearance.currentDrawing()
         
         let snapshotter = MKMapSnapshotter(options: options)
         
         do {
             let snapshot = try await snapshotter.start()
+            let baseImage = snapshot.image
             
-            // 在地圖上繪製路線
-            let image = NSImage(size: size)
-            image.lockFocus()
+            // 轉為高品質黑白高對比度
+            var renderedBaseImage: NSImage = baseImage
+            if let ciImage = CIImage(data: baseImage.tiffRepresentation!) {
+                let monoFilter = CIFilter(name: "CIPhotoEffectMono")
+                monoFilter?.setValue(ciImage, forKey: kCIInputImageKey)
+                
+                let colorFilter = CIFilter(name: "CIColorControls")
+                colorFilter?.setValue(monoFilter?.outputImage, forKey: kCIInputImageKey)
+                colorFilter?.setValue(1.5, forKey: kCIInputContrastKey)
+                colorFilter?.setValue(0.1, forKey: kCIInputBrightnessKey)
+                
+                let sharpenFilter = CIFilter(name: "CIUnsharpMask")
+                sharpenFilter?.setValue(colorFilter?.outputImage, forKey: kCIInputImageKey)
+                sharpenFilter?.setValue(2.0, forKey: kCIInputRadiusKey)
+                sharpenFilter?.setValue(1.0, forKey: kCIInputIntensityKey)
+                
+                if let output = sharpenFilter?.outputImage {
+                    let rep = NSCIImageRep(ciImage: output)
+                    let monochromeImage = NSImage(size: renderSize)
+                    monochromeImage.addRepresentation(rep)
+                    renderedBaseImage = monochromeImage
+                }
+            }
+            
+            // 在地圖上繪製路線（使用 2x 畫布）
+            let finalImage = NSImage(size: renderSize)
+            finalImage.lockFocus()
             
             // 繪製基礎地圖
-            snapshot.image.draw(at: .zero, from: NSRect(origin: .zero, size: size), operation: .copy, fraction: 1.0)
+            renderedBaseImage.draw(at: .zero, from: NSRect(origin: .zero, size: renderSize), operation: .copy, fraction: 1.0)
             
             // 繪製路線
             let context = NSGraphicsContext.current?.cgContext
             context?.setStrokeColor(NSColor.systemBlue.cgColor)
-            context?.setLineWidth(4)
+            context?.setLineWidth(8) // 2x 畫布，線條也要加粗
             context?.setLineCap(.round)
             context?.setLineJoin(.round)
             
-            // 轉換路線座標到圖片座標
             let points = route.polyline.points()
             let pointCount = route.polyline.pointCount
             
@@ -137,41 +164,33 @@ class MapService {
                     let point = snapshot.point(for: points[i].coordinate)
                     context?.addLine(to: point)
                 }
-                
                 context?.strokePath()
             }
             
-            // 繪製起點標記（藍色圓點）
+            // 繪製起點（藍色點）
             if pointCount > 0 {
-                let firstPoint = points[0]
-                let point = snapshot.point(for: firstPoint.coordinate)
-                let markerRect = NSRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16)
-                
+                let point = snapshot.point(for: points[0].coordinate)
+                let markerRect = NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32)
                 context?.setFillColor(NSColor.systemBlue.cgColor)
                 context?.fillEllipse(in: markerRect)
-                
                 context?.setStrokeColor(NSColor.white.cgColor)
-                context?.setLineWidth(2)
+                context?.setLineWidth(4)
                 context?.strokeEllipse(in: markerRect)
             }
             
-            // 繪製終點標記（紅色圖釘）
+            // 繪製終點（紅色點）
             if pointCount > 0 {
-                let lastPoint = points[pointCount - 1]
-                let point = snapshot.point(for: lastPoint.coordinate)
-                let markerRect = NSRect(x: point.x - 12, y: point.y - 24, width: 24, height: 24)
-                
+                let point = snapshot.point(for: points[pointCount - 1].coordinate)
+                let markerRect = NSRect(x: point.x - 20, y: point.y - 20, width: 40, height: 40)
                 context?.setFillColor(NSColor.systemRed.cgColor)
                 context?.fillEllipse(in: markerRect)
-                
                 context?.setStrokeColor(NSColor.white.cgColor)
-                context?.setLineWidth(2)
+                context?.setLineWidth(4)
                 context?.strokeEllipse(in: markerRect)
             }
             
-            image.unlockFocus()
-            
-            return image
+            finalImage.unlockFocus()
+            return finalImage
         } catch {
             throw MapServiceError.snapshotFailed(error.localizedDescription)
         }
@@ -190,14 +209,38 @@ class MapService {
     ) async throws -> NSImage {
         let options = MKMapSnapshotter.Options()
         options.region = MKCoordinateRegion(center: coordinate, span: span)
-        options.size = size
+        options.size = CGSize(width: size.width * 2, height: size.height * 2)
         options.mapType = .standard
         
         let snapshotter = MKMapSnapshotter(options: options)
         
         do {
             let snapshot = try await snapshotter.start()
-            return snapshot.image
+            let baseImage = snapshot.image
+            
+            // 轉為高品質黑白
+            if let ciImage = CIImage(data: baseImage.tiffRepresentation!) {
+                let monoFilter = CIFilter(name: "CIPhotoEffectMono")
+                monoFilter?.setValue(ciImage, forKey: kCIInputImageKey)
+                
+                let colorFilter = CIFilter(name: "CIColorControls")
+                colorFilter?.setValue(monoFilter?.outputImage, forKey: kCIInputImageKey)
+                colorFilter?.setValue(1.5, forKey: kCIInputContrastKey)
+                
+                let sharpenFilter = CIFilter(name: "CIUnsharpMask")
+                sharpenFilter?.setValue(colorFilter?.outputImage, forKey: kCIInputImageKey)
+                sharpenFilter?.setValue(2.0, forKey: kCIInputRadiusKey)
+                sharpenFilter?.setValue(1.0, forKey: kCIInputIntensityKey)
+                
+                if let output = sharpenFilter?.outputImage {
+                    let rep = NSCIImageRep(ciImage: output)
+                    let monochromeImage = NSImage(size: size)
+                    monochromeImage.addRepresentation(rep)
+                    return monochromeImage
+                }
+            }
+            
+            return baseImage
         } catch {
             throw MapServiceError.snapshotFailed(error.localizedDescription)
         }

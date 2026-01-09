@@ -105,4 +105,34 @@ class EventKitService: ObservableObject {
             print("Event not found for deletion: \(identifier)")
         }
     }
+    
+    func updateEvent(
+        identifier: String,
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        isAllDay: Bool = false,
+        calendar: EKCalendar? = nil,
+        location: String? = nil,
+        url: URL? = nil,
+        notes: String? = nil
+    ) throws {
+        guard let event = eventStore.event(withIdentifier: identifier) else {
+            print("Event not found for update: \(identifier)")
+            return
+        }
+        
+        event.title = title
+        event.startDate = startDate
+        event.endDate = endDate
+        event.isAllDay = isAllDay
+        if let calendar = calendar {
+            event.calendar = calendar
+        }
+        event.location = location
+        event.url = url
+        event.notes = notes
+        
+        try eventStore.save(event, span: .thisEvent)
+    }
 }

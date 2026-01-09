@@ -2,10 +2,12 @@ import SwiftUI
 import EventKit
 
 struct EventDetailView: View {
+    @ObservedObject var viewModel: CalendarViewModel
     let event: CalendarEvent
     var onClose: () -> Void
     var onDelete: () -> Void // Callback for deletion
     
+    @State private var showEditSheet = false
     @StateObject private var routeViewModel = RouteViewModel()
     
     var body: some View {
@@ -26,15 +28,33 @@ struct EventDetailView: View {
                 
                 Spacer()
                 
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14))
-                        .foregroundColor(.red)
+                HStack(spacing: 12) {
+                    // 編輯按鈕
+                    Button(action: { showEditSheet = true }) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // 刪除按鈕
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundColor(.red)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding()
             .background(Color(nsColor: .controlBackgroundColor))
+            .sheet(isPresented: $showEditSheet) {
+                AddEventView(
+                    viewModel: viewModel,
+                    isPresented: $showEditSheet,
+                    editingEvent: event
+                )
+            }
             
             Divider()
             

@@ -4,13 +4,15 @@ import MapKit
 /// 事件地點詳情視圖
 /// 支援三種狀態：hidden（隱藏）、compact（350px）、expanded（500px）
 struct EventLocationDetailView: View {
+    @ObservedObject var viewModel: CalendarViewModel // 新增 viewModel
     let event: CalendarEvent
     let routeInfo: MultiRouteInfo?
     var onClose: () -> Void
     var onDelete: () -> Void
     
     @State private var mapState: MapState = .hidden
-    @State private var popoverWidth: CGFloat = 350
+    @State private var showEditSheet = false // 新增編輯 sheet 狀態
+    @Binding var popoverWidth: CGFloat // 改為 Binding
     
     enum MapState {
         case hidden    // 不顯示地圖
@@ -47,11 +49,26 @@ struct EventLocationDetailView: View {
             // 地圖區域（如果展開）
             if mapState != .hidden {
                 mapSection
+                    .padding(.top, 5) // 標題下方 5px
             }
         }
         .frame(width: popoverWidth)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: popoverWidth)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: popoverWidth)
+        .background(
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                if mapState == .expanded {
+                    // 只有在放大模式下才顯示地圖資訊區的 Material 背景
+                    VStack(spacing: 0) {
+                        Spacer().frame(maxHeight: .infinity)
+                        // 這裡的高度計算需要準確，或者我們直接在 mapInfoCard 內部處理
+                        Rectangle()
+                            .fill(.ultraThinMaterial)
+                            .frame(height: 350 + 200) // 地圖高度 + 資訊區域估計高度
+                    }
+                }
+            }
+        )
         .cornerRadius(12)
         .shadow(radius: 10)
     }
@@ -75,16 +92,33 @@ struct EventLocationDetailView: View {
             
             Spacer()
             
-            // 刪除按鈕
-            Button(action: onDelete) {
-                Image(systemName: "trash")
-                    .font(.system(size: 14))
-                    .foregroundColor(.red)
+            HStack(spacing: 12) {
+                // 編輯按鈕
+                Button(action: { showEditSheet = true }) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                }
+                .buttonStyle(.plain)
+                
+                // 刪除按鈕
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding()
         .background(Color(nsColor: .controlBackgroundColor))
+        .sheet(isPresented: $showEditSheet) {
+            AddEventView(
+                viewModel: viewModel,
+                isPresented: $showEditSheet,
+                editingEvent: event
+            )
+        }
     }
     
     private var headerButtonIcon: String {
@@ -237,123 +271,130 @@ struct EventLocationDetailView: View {
     @ViewBuilder
     private var mapSection: some View {
         if let multiRoute = routeInfo, let route = multiRoute.recommendedRoute {
-            ZStack(alignment: .topTrailing) {
-                // 地圖
-                MapSnapshotView(
-                    route: route.route,
-                    size: CGSize(
-                        width: popoverWidth,
-                        height: mapState == .expanded ? 350 : 250
+            VStack(spacing: 0) {
+                ZStack(alignment: .topTrailing) {
+                    // 地圖
+                    MapSnapshotView(
+                        route: route.route,
+                        size: CGSize(
+                            width: popoverWidth,
+                            height: mapState == .expanded ? 350 : 250
+                        )
                     )
-                )
-                
-                // 放大按鈕（僅在 compact 狀態顯示）
-                if mapState == .compact {
-                    Button(action: expandMap) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                            .padding(8)
-                            .background(Color.black.opacity(0.6))
-                            .clipShape(Circle())
+                    
+                    // 放大按鈕（僅在 compact 狀態顯示）
+                    if mapState == .compact {
+                        Button(action: expandMap) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white)
+                                .padding(8)
+                                .background(Color.black.opacity(0.6))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(12)
                     }
-                    .buttonStyle(.plain)
-                    .padding(12)
+                }
+                
+                // 詳細路線資訊（浮動卡片）
+                mapInfoCard(multiRoute: multiRoute)
+                
+                if mapState == .expanded {
+                    Spacer(minLength: 16)
                 }
             }
-            
-            // 詳細路線資訊（浮動卡片）
-            mapInfoCard(multiRoute: multiRoute)
         }
     }
     
     // MARK: - Map Info Card
     @ViewBuilder
     private func mapInfoCard(multiRoute: MultiRouteInfo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // 交通資訊
+        VStack(alignment: .leading, spacing: 16) {
+            // 第一排：交通資訊（在 500px 下更開闊）
             if let route = multiRoute.recommendedRoute {
-                HStack(spacing: mapState == .expanded ? 24 : 16) {
+                HStack(spacing: mapState == .expanded ? 32 : 16) {
                     // 距離
                     HStack(spacing: 6) {
                         Image(systemName: "ruler")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                         Text(route.distanceText)
-                            .font(.system(size: 13))
-                            .foregroundColor(.primary)
+                            .font(.system(size: 13, weight: .medium))
                     }
                     
                     // 各種交通方式
-                    if let driving = multiRoute.driving {
-                        transportTimeView(route: driving)
-                    }
-                    if let walking = multiRoute.walking {
-                        transportTimeView(route: walking)
-                    }
-                    if let transit = multiRoute.transit {
-                        transportTimeView(route: transit)
-                    }
-                }
-            }
-            
-            // 建議出發時間
-            if !event.isAllDay, let eventTime = event.time,
-               let route = multiRoute.recommendedRoute {
-                let departureTimeText = route.suggestedDepartureTimeText(for: eventTime)
-                let (shouldDepart, minutesUntil) = route.departureStatus(for: eventTime)
-                
-                HStack(spacing: 8) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 12))
-                        .foregroundColor(.blue)
-                    Text("建議出發時間：\(departureTimeText)")
-                        .font(.system(size: 13))
-                        .foregroundColor(.blue)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(6)
-                
-                // 出發警告
-                if shouldDepart {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(minutesUntil <= 5 ? .red : .orange)
-                        
-                        if minutesUntil <= 0 {
-                            Text("該出發了！")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.red)
-                        } else {
-                            Text("還有 \(minutesUntil) 分鐘該出發了！")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(minutesUntil <= 5 ? .red : .orange)
+                    HStack(spacing: mapState == .expanded ? 20 : 12) {
+                        if let driving = multiRoute.driving {
+                            transportTimeView(route: driving)
+                        }
+                        if let walking = multiRoute.walking {
+                            transportTimeView(route: walking)
+                        }
+                        if let transit = multiRoute.transit {
+                            transportTimeView(route: transit)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background((minutesUntil <= 5 ? Color.red : Color.orange).opacity(0.1))
-                    .cornerRadius(6)
+                    
+                    if mapState == .expanded {
+                        Spacer()
+                    }
                 }
             }
             
-            // 打開地圖按鈕
+            // 第二排：建議時間與提醒
+            HStack(spacing: 16) {
+                if !event.isAllDay, let eventTime = event.time,
+                   let route = multiRoute.recommendedRoute {
+                    let departureTimeText = route.suggestedDepartureTimeText(for: eventTime)
+                    let (shouldDepart, minutesUntil) = route.departureStatus(for: eventTime)
+                    
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.blue.opacity(0.8))
+                        Text("建議出發：\(departureTimeText)")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(6)
+                    
+                    if shouldDepart {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text(minutesUntil <= 0 ? "該出發了！" : "剩餘 \(minutesUntil) 分鐘")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background((minutesUntil <= 5 ? Color.red : Color.orange).opacity(0.1))
+                        .foregroundColor(minutesUntil <= 5 ? .red : .orange)
+                        .cornerRadius(6)
+                    }
+                }
+                
+                if mapState == .expanded {
+                    Spacer()
+                }
+            }
+            
+            // 第三排：按鈕
             HStack(spacing: 12) {
                 Button(action: openInAppleMaps) {
                     HStack(spacing: 6) {
-                        Image(systemName: "map")
+                        Image(systemName: "apple.logo")
                             .font(.system(size: 11))
-                        Text("在 Apple Maps 中打開")
-                            .font(.system(size: 12))
+                        Text("Apple Maps")
+                            .font(.system(size: 12, weight: .semibold))
                     }
                     .foregroundColor(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     .background(Color(nsColor: .controlBackgroundColor))
-                    .cornerRadius(6)
+                    .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
                 
@@ -361,22 +402,34 @@ struct EventLocationDetailView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "map.fill")
                             .font(.system(size: 11))
-                        Text("在 Google Maps 中打開")
-                            .font(.system(size: 12))
+                        Text("Google Maps")
+                            .font(.system(size: 12, weight: .semibold))
                     }
                     .foregroundColor(.primary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     .background(Color(nsColor: .controlBackgroundColor))
-                    .cornerRadius(6)
+                    .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
+                
+                if mapState == .expanded {
+                    Spacer()
+                }
             }
         }
         .padding(16)
-        .background(.ultraThinMaterial)
-        .cornerRadius(12)
-        .padding(16)
+        .background(
+            Group {
+                if mapState == .compact {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(.ultraThinMaterial)
+                        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+                }
+            }
+        )
+        .padding(mapState == .expanded ? 0 : 16)
+        .padding(.bottom, mapState == .expanded ? 20 : 0)
     }
     
     // MARK: - Helper Views
