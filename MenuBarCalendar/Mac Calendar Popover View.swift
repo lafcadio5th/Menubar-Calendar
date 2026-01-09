@@ -356,14 +356,26 @@ struct CalendarPopoverView: View {
                     Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { withAnimation { selectedEvent = nil } }
                     VStack {
                         Spacer()
-                        EventDetailView(
-                            event: event,
-                            onClose: { withAnimation { selectedEvent = nil } },
-                            onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
-                        )
-                        .frame(height: 480)
-                        .transition(.move(edge: .bottom))
-                        .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
+                        
+                        // 使用不同的視圖根據是否有地點
+                        if event.locationCoordinate != nil {
+                            EventLocationDetailViewWrapper(
+                                event: event,
+                                onClose: { withAnimation { selectedEvent = nil } },
+                                onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
+                            )
+                            .transition(.move(edge: .bottom))
+                            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
+                        } else {
+                            EventDetailView(
+                                event: event,
+                                onClose: { withAnimation { selectedEvent = nil } },
+                                onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
+                            )
+                            .frame(height: 480)
+                            .transition(.move(edge: .bottom))
+                            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
+                        }
                     }
                 }
             }
@@ -457,5 +469,31 @@ struct VisualEffectBlur: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         nsView.material = material
         nsView.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Event Location Detail View Wrapper
+struct EventLocationDetailViewWrapper: View {
+    let event: CalendarEvent
+    var onClose: () -> Void
+    var onDelete: () -> Void
+    
+    @StateObject private var routeViewModel = RouteViewModel()
+    
+    var body: some View {
+        EventLocationDetailView(
+            event: event,
+            routeInfo: routeViewModel.routeInfo,
+            onClose: onClose,
+            onDelete: onDelete
+        )
+        .onAppear {
+            // Calculate route if event has location
+            if let coordinate = event.locationCoordinate {
+                Task {
+                    await routeViewModel.calculateRoute(to: coordinate)
+                }
+            }
+        }
     }
 }
