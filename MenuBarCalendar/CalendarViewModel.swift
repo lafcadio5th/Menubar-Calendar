@@ -186,6 +186,20 @@ class CalendarViewModel: ObservableObject {
         return formatter.string(from: currentMonth)
     }
     
+    var currentMonthNameShort: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_TW")
+        let year = calendar.component(.year, from: currentMonth)
+        let currentYear = calendar.component(.year, from: Date())
+        
+        if year == currentYear {
+            formatter.dateFormat = "LLLL" // "一月"
+        } else {
+            formatter.dateFormat = "yyyy年 LLLL"
+        }
+        return formatter.string(from: currentMonth)
+    }
+    
     var selectedDateString: String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_TW")
@@ -470,6 +484,28 @@ class CalendarViewModel: ObservableObject {
         }
         
         isLoadingEvents = false
+        
+        // 觸發背景預載
+        prewarmTodaysRoutes()
+    }
+    
+    private func prewarmTodaysRoutes() {
+        // 篩選出今天的且有座標的事件
+        let todayEvents = events.filter { 
+             calendar.isDateInToday($0.date) && $0.locationCoordinate != nil 
+        }
+        
+        guard !todayEvents.isEmpty else { return }
+        
+        Task(priority: .background) {
+            print("🚀 自動預載 \(todayEvents.count) 個事件的路線資訊...")
+            let routeVM = RouteViewModel() // 臨時實例，利用靜態快取
+            for event in todayEvents {
+                if let coord = event.locationCoordinate {
+                   await routeVM.prewarm(to: coord)
+                }
+            }
+        }
     }
     
     private func colorForCalendar(_ ekCalendar: EKCalendar) -> Color {
@@ -501,7 +537,6 @@ class CalendarViewModel: ObservableObject {
         
         // 讀取設定：是否週一為第一天
         let startWeekOnMonday = UserDefaults.standard.bool(forKey: "startWeekOnMonday")
-        let weekdayOffset = startWeekOnMonday ? 1 : 0
         
         let year = calendar.component(.year, from: currentMonth)
         let month = calendar.component(.month, from: currentMonth)

@@ -16,6 +16,7 @@ class LocationService: NSObject, ObservableObject {
     
     // MARK: - Private Properties
     private let locationManager = CLLocationManager()
+    @available(macOS, deprecated: 26.0, message: "Consider migrating to MapKit's geocoding APIs")
     private var geocoder = CLGeocoder()
     
     // MARK: - Initialization

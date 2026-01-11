@@ -4,23 +4,34 @@ import MapKit
 /// 事件地點詳情視圖
 /// 支援三種狀態：hidden（隱藏）、compact（350px）、expanded（500px）
 struct EventLocationDetailView: View {
-    @ObservedObject var viewModel: CalendarViewModel // 新增 viewModel
+    @Environment(\.colorScheme) var colorScheme
+    @ObservedObject var viewModel: CalendarViewModel
     let event: CalendarEvent
     let routeInfo: MultiRouteInfo?
     var onClose: () -> Void
     var onDelete: () -> Void
     
     @State private var mapState: MapState = .hidden
-    @State private var showEditSheet = false // 新增編輯 sheet 狀態
-    @Binding var popoverWidth: CGFloat // 改為 Binding
+    @Binding var popoverWidth: CGFloat 
     
     enum MapState {
         case hidden    // 不顯示地圖
         case compact   // 350px 顯示地圖
         case expanded  // 500px 放大地圖
     }
+    @State private var showEditSheet = false // 新增編輯 sheet 狀態
+    @AppStorage("isPinnedToDesktop") private var isPinnedToDesktop: Bool = false
     
     var body: some View {
+        mainContent
+            .frame(width: popoverWidth) // Frame constraint
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: popoverWidth)
+            .background(colorScheme == .dark ? Color.black : Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    // Main Content definition
+    private var mainContent: some View {
         VStack(spacing: 0) {
             // Header
             header
@@ -28,49 +39,70 @@ struct EventLocationDetailView: View {
             Divider()
             
             // Content
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    // Title & Time
-                    titleSection
-                    
-                    Divider()
-                    
-                    // Details
-                    detailsSection
-                    
-                    // 地點資訊（如果有）
-                    if event.location != nil || event.locationCoordinate != nil {
-                        locationSection
-                    }
+            VStack(alignment: .leading, spacing: 16) {
+                titleSection
+                Divider()
+                detailsSection
+                
+                if event.location != nil || event.locationCoordinate != nil {
+                    locationSection
                 }
-                .padding(20)
             }
+            .padding(20)
             
-            // 地圖區域（如果展開）
+            // Map Section (Standard Vertical Stack)
             if mapState != .hidden {
                 mapSection
-                    .padding(.top, 5) // 標題下方 5px
+                    .padding(.top, 5)
+            }
+            
+            // In Desktop mode, we push content to top
+            if isPinnedToDesktop {
+                Spacer(minLength: 0)
             }
         }
-        .frame(width: popoverWidth)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: popoverWidth)
-        .background(
-            ZStack {
-                Color(nsColor: .windowBackgroundColor)
-                if mapState == .expanded {
-                    // 只有在放大模式下才顯示地圖資訊區的 Material 背景
-                    VStack(spacing: 0) {
-                        Spacer().frame(maxHeight: .infinity)
-                        // 這裡的高度計算需要準確，或者我們直接在 mapInfoCard 內部處理
-                        Rectangle()
-                            .fill(.ultraThinMaterial)
-                            .frame(height: 350 + 200) // 地圖高度 + 資訊區域估計高度
+    }
+    
+    // ...
+    
+    // MARK: - Map Section Refactor (Revert to Stack)
+    @ViewBuilder
+    private var mapSection: some View {
+        if let multiRoute = routeInfo, let route = multiRoute.recommendedRoute {
+            VStack(spacing: 0) {
+                 // 1. Map
+                 ZStack(alignment: .topTrailing) {
+                    MapSnapshotView(
+                        route: route.route,
+                        size: CGSize(
+                            width: mapState == .expanded ? 500 : 350,
+                            height: mapState == .expanded ? 350 : 250
+                        )
+                    )
+                    
+                    if mapState == .compact {
+                        Button(action: expandMap) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 12))
+                                .foregroundColor(.white)
+                                .padding(8)
+                                .background(Color.black.opacity(0.6))
+                                .clipShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(12)
                     }
                 }
+                
+                // 2. Info Card (Stacked BELOW map, no overlap)
+                mapInfoCard(multiRoute: multiRoute)
+                    .padding(16)
+                    // Remove the background if we want clean look, or keep it.
+                    // Since it's white-on-white, maybe divider?
+                    // But mapInfoCard has its own background logic? 
+                    // Let's rely on mapInfoCard's internal styling, but standard vertical flow.
             }
-        )
-        .cornerRadius(12)
-        .shadow(radius: 10)
+        }
     }
     
     // MARK: - Header
@@ -111,7 +143,7 @@ struct EventLocationDetailView: View {
             }
         }
         .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(colorScheme == .dark ? Color.black : Color.white)
         .sheet(isPresented: $showEditSheet) {
             AddEventView(
                 viewModel: viewModel,
@@ -157,6 +189,7 @@ struct EventLocationDetailView: View {
                     .foregroundColor(.secondary)
             }
         }
+        .fixedSize(horizontal: false, vertical: true) // Force it to fit content height
     }
     
     // MARK: - Details Section
@@ -267,45 +300,6 @@ struct EventLocationDetailView: View {
         }
     }
     
-    // MARK: - Map Section
-    @ViewBuilder
-    private var mapSection: some View {
-        if let multiRoute = routeInfo, let route = multiRoute.recommendedRoute {
-            VStack(spacing: 0) {
-                ZStack(alignment: .topTrailing) {
-                    // 地圖
-                    MapSnapshotView(
-                        route: route.route,
-                        size: CGSize(
-                            width: popoverWidth,
-                            height: mapState == .expanded ? 350 : 250
-                        )
-                    )
-                    
-                    // 放大按鈕（僅在 compact 狀態顯示）
-                    if mapState == .compact {
-                        Button(action: expandMap) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 12))
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(Color.black.opacity(0.6))
-                                .clipShape(Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .padding(12)
-                    }
-                }
-                
-                // 詳細路線資訊（浮動卡片）
-                mapInfoCard(multiRoute: multiRoute)
-                
-                if mapState == .expanded {
-                    Spacer(minLength: 16)
-                }
-            }
-        }
-    }
     
     // MARK: - Map Info Card
     @ViewBuilder
@@ -418,19 +412,21 @@ struct EventLocationDetailView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(16) // Content internal padding
         .background(
-            Group {
-                if mapState == .compact {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.ultraThinMaterial)
-                        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-                }
-            }
+            // Card background styling
+            RoundedRectangle(cornerRadius: 12)
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .padding(mapState == .expanded ? 0 : 16)
-        .padding(.bottom, mapState == .expanded ? 20 : 0)
+        // No external padding here needed, parent stack handles it or we do it here.
+        // For VStack flow, we usually want horizontal padding if it's full width
+        // But in mapSection we applied .padding(16) to the card.
+        // So here we should just contain the card visuals.
     }
+    
+    // ... inside mapSection ...
+    // Note: I will modify mapSection spacer in a separate hunk or manually verify
     
     // MARK: - Helper Views
     @ViewBuilder

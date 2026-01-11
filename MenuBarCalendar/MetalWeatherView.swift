@@ -10,7 +10,7 @@ struct WeatherUniforms {
     var weatherCode: Int32       // Offset 16
     var timeOfDay: Int32         // Offset 20
     var style: Int32             // Offset 24 (0: Realistic, 1: Glassmorphic)
-    var _pad2: Int32 = 0         // Offset 28 (Padding to 32 bytes)
+    var variant: Int32           // Offset 28 (0: Cinematic, 1: Soft)
 }
 
 // MARK: - Metal Weather View Representable
@@ -18,12 +18,14 @@ struct MetalWeatherView: NSViewRepresentable {
     let weatherCode: Int
     let timeOfDay: Int // Pass logic from parent
     let style: WeatherStyle
+    let variant: Int 
     
     // Default int for generic usage, but parent should ideally control this
-    init(weatherCode: Int, timeOfDay: Int = 0, style: WeatherStyle = .realistic) {
+    init(weatherCode: Int, timeOfDay: Int = 0, style: WeatherStyle = .realistic, variant: Int = 0) {
         self.weatherCode = weatherCode
         self.timeOfDay = timeOfDay
         self.style = style
+        self.variant = variant
     }
     
     func makeNSView(context: Context) -> MTKView {
@@ -44,7 +46,7 @@ struct MetalWeatherView: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: MTKView, context: Context) {
-        context.coordinator.updateState(weatherCode: weatherCode, timeOfDay: timeOfDay, style: style)
+        context.coordinator.updateState(weatherCode: weatherCode, timeOfDay: timeOfDay, style: style, variant: variant)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -61,6 +63,7 @@ struct MetalWeatherView: NSViewRepresentable {
         var currentWeatherCode: Int = 0
         var currentTimeOfDay: Int = 0
         var currentStyle: WeatherStyle = .realistic
+        var currentVariant: Int = 0
         
         let vertexData: [Float] = [
             -1.0, -1.0, 0.0, 1.0,
@@ -75,6 +78,7 @@ struct MetalWeatherView: NSViewRepresentable {
             self.currentWeatherCode = parent.weatherCode
             self.currentTimeOfDay = parent.timeOfDay
             self.currentStyle = parent.style
+            self.currentVariant = parent.variant
         }
         
         func setup(device: MTLDevice) {
@@ -107,10 +111,11 @@ struct MetalWeatherView: NSViewRepresentable {
             vertexBuffer = device.makeBuffer(bytes: vertexData, length: vertexData.count * 4, options: [])
         }
         
-        func updateState(weatherCode: Int, timeOfDay: Int, style: WeatherStyle) {
+        func updateState(weatherCode: Int, timeOfDay: Int, style: WeatherStyle, variant: Int) {
             self.currentWeatherCode = weatherCode
             self.currentTimeOfDay = timeOfDay
             self.currentStyle = style
+            self.currentVariant = variant
         }
         
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -139,7 +144,8 @@ struct MetalWeatherView: NSViewRepresentable {
                 resolution: SIMD2<Float>(width, height),
                 weatherCode: shaderCode,
                 timeOfDay: Int32(currentTimeOfDay),
-                style: Int32(currentStyle == .realistic ? 0 : 1)
+                style: Int32(currentStyle == .realistic ? 0 : 1),
+                variant: Int32(currentVariant)
             )
             
             let commandBuffer = commandQueue.makeCommandBuffer()
@@ -168,6 +174,7 @@ struct Uniforms {
     int weatherCode; // 0:Sunny, 1:Cloudy, 2:Overcast, 3:Storm
     int timeOfDay;   // 0:Day, 1:Sunset, 2:Night
     int style;       // 0:Realistic, 1:Glassmorphic
+    int variant;     // 0:Cinematic, 1:Soft
 };
 
 struct VertexOut {
@@ -317,6 +324,7 @@ fragment float4 weatherFragment(VertexOut in [[stage_in]], constant Uniforms &un
     float time = uniforms.time;
     int code = uniforms.weatherCode;
     int style = uniforms.style;
+    int variant = uniforms.variant;
     
     // Apply Heat Haze distortion to UVs if it's Sunny/Clear
     float2 uv = (code == 0 && style == 0) ? applyHeatHaze(rawUV, time, 0.015) : rawUV;
@@ -397,27 +405,90 @@ fragment float4 weatherFragment(VertexOut in [[stage_in]], constant Uniforms &un
     } else { // Realistic Style (UPGRADED TO CINEMATIC)
         if (code == 0) { // Clear
             col = mix(skyTop, skyBot, uv.y);
-            if (timeOfDay == 0) { // Sunny Day: ULTRA BLINDING
-                float2 sunPos = float2(0.6 * aspect, 0.5);
-                float2 sunUV = st - sunPos;
-                
-                // 1. Intense Blinding Sun Core (MEGA BOOST)
-                float sunCore = sun(sunUV, aspect, 0.08, 0.01);
-                float sunSpike = pow(max(0.0, 1.0 - length(sunUV * 2.2)), 80.0) * 4.0;
-                float sunGlow = sun(sunUV, aspect, 1.2, 0.6);
-                
-                col += float3(1.0, 0.95, 0.7) * sunGlow * 1.0;
-                col += float3(1.0, 1.0, 1.0) * (sunCore * 2.0 + sunSpike);
-                
-                // 2. Extra Cinematic Lens Flare (NEW)
-                col += lensFlare(st, sunPos, float3(1.0, 0.9, 0.8));
-                
-                // 3. Sharper God Rays (BOOSTED)
-                col += godRays(st, sunPos, time, float3(1.0, 1.0, 0.9)) * 1.8;
-                
-                // 4. Atmospheric Glare
-                col = renderClouds(st, time, col, -0.45, sunDir, cloudBase, cloudShadow);
-                col += float3(0.2, 0.1, 0.0) * sunGlow * 0.5; // Direct glare tint
+            if (timeOfDay == 0) { // Sunny Day
+                if (variant == 0) { // Variant A: ULTRA BLINDING CINEMATIC
+                    float2 sunPos = float2(0.6 * aspect, 0.5);
+                    float2 sunUV = st - sunPos;
+                    
+                    // 1. Intense Blinding Sun Core (MEGA BOOST)
+                    float sunCore = sun(sunUV, aspect, 0.08, 0.01);
+                    float sunSpike = pow(max(0.0, 1.0 - length(sunUV * 2.2)), 80.0) * 4.0;
+                    float sunGlow = sun(sunUV, aspect, 1.2, 0.6);
+                    
+                    col += float3(1.0, 0.95, 0.7) * sunGlow * 1.0;
+                    col += float3(1.0, 1.0, 1.0) * (sunCore * 2.0 + sunSpike);
+                    
+                    // 2. Extra Cinematic Lens Flare (NEW)
+                    col += lensFlare(st, sunPos, float3(1.0, 0.9, 0.8));
+                    
+                    // 3. Sharper God Rays (BOOSTED)
+                    col += godRays(st, sunPos, time, float3(1.0, 1.0, 0.9)) * 1.8;
+                    
+                    // 4. Atmospheric Glare
+                    col = renderClouds(st, time, col, -0.45, sunDir, cloudBase, cloudShadow);
+                    col += float3(0.2, 0.1, 0.0) * sunGlow * 0.5; // Direct glare tint
+                } else if (variant == 1) { // Variant B: SOFT PEACEFUL DAY
+                    float2 sunPos = float2(0.7 * aspect, 0.65);
+                    float2 sunUV = st - sunPos;
+                    
+                    // 1. Softer Sun
+                    float sunCore = sun(sunUV, aspect, 0.12, 0.05); // Larger, softer core
+                    float sunGlow = sun(sunUV, aspect, 1.5, 0.8); // Wider, gentle glow
+                    
+                    col = mix(float3(0.1, 0.6, 1.0), float3(0.5, 0.8, 1.0), uv.y); // Fresher Blue Sky
+                    col += float3(1.0, 0.98, 0.9) * sunGlow * 0.6;
+                    col += float3(1.0, 1.0, 0.95) * sunCore * 1.2;
+                    
+                    // 2. No heavy lens flare, just gentle rays
+                    col += godRays(st, sunPos, time * 0.5, float3(1.0, 1.0, 1.0)) * 0.8;
+                    
+                    // 3. Floating Dust/Pollen Particles (Peaceful)
+                    float dust = particles(st, time * 0.2, 0.5, 0.8, 20.0);
+                    col += float3(1.0, 1.0, 1.0) * dust * 0.3;
+                    
+                    // 4. Light wispy clouds
+                    col = renderClouds(st, time * 0.5, col, -0.3, sunDir, float3(1.0), float3(0.9));
+                    
+                } else if (variant == 2) { // Variant C: GOLDEN WARMTH (New)
+                    float2 sunPos = float2(0.4 * aspect, 0.55);
+                    float2 sunUV = st - sunPos;
+                    
+                    // Warm Gradient
+                    col = mix(float3(0.0, 0.4, 0.8), float3(0.8, 0.7, 0.5), uv.y); 
+                    
+                    // Golden Sun
+                    float sunCore = sun(sunUV, aspect, 0.09, 0.02);
+                    float sunGlow = sun(sunUV, aspect, 0.8, 0.4);
+                    col += float3(1.0, 0.8, 0.4) * sunGlow * 0.8;
+                    col += float3(1.0, 0.9, 0.6) * sunCore * 2.5; // Bright Gold
+                    
+                    // Golden Rays
+                    col += godRays(st, sunPos, time * 0.8, float3(1.0, 0.8, 0.2)) * 1.5;
+                    
+                    // Warm Clouds
+                    col = renderClouds(st, time * 0.7, col, -0.2, sunDir, float3(1.0, 0.95, 0.9), float3(0.8, 0.6, 0.5));
+                    
+                } else { // Variant D: CRISP HIGH NOON (New)
+                    // High Center Sun
+                    float2 sunPos = float2(0.5 * aspect, 0.8); 
+                    float2 sunUV = st - sunPos;
+                    
+                    // Deep Azure Sky (High Contrast)
+                    col = mix(float3(0.0, 0.3, 0.9), float3(0.4, 0.7, 1.0), uv.y);
+                    
+                    // Pure White Sharp Sun
+                    float sunCore = sun(sunUV, aspect, 0.06, 0.005); // Sharp
+                    float sunHalo = sun(sunUV, aspect, 0.4, 0.2);
+                    
+                    col += float3(1.0, 1.0, 1.0) * sunHalo * 0.4;
+                    col += float3(1.0, 1.0, 1.0) * sunCore * 3.0; // Intense White
+                    
+                    // Minimal Rays, just clear air
+                    col += godRays(st, sunPos, time * 0.3, float3(0.8, 0.9, 1.0)) * 0.5;
+                    
+                    // Minimal Clouds (Clear Day)
+                    col = renderClouds(st, time * 0.3, col, -0.5, sunDir, float3(1.0), float3(0.9));
+                }
                 
             } else if (timeOfDay == 1) { // Sunset
                 float2 sunPos = float2(0.0, -0.4);
@@ -440,18 +511,49 @@ fragment float4 weatherFragment(VertexOut in [[stage_in]], constant Uniforms &un
                 col = renderClouds(st, time, col, -0.25, sunDir, cloudBase, cloudShadow);
             }
         } else if (code == 1) { // Cloudy
-            col = mix(skyTop * 0.85, skyBot * 0.85, uv.y);
-            col = renderClouds(st, time, col, 0.2, sunDir, cloudBase, cloudShadow);
+            if (variant == 0) { // Variant A: Balanced (Original)
+                col = mix(skyTop * 0.85, skyBot * 0.85, uv.y);
+                col = renderClouds(st, time, col, 0.2, sunDir, cloudBase, cloudShadow);
+            } else if (variant == 1) { // Variant B: Rolling Cumulus (Thicker, Lower)
+                col = mix(skyTop * 0.75, skyBot * 0.9, uv.y); // More contrast in sky
+                // Higher density (0.4), faster time (time * 1.2)
+                col = renderClouds(st, time * 1.2, col, 0.45, sunDir, cloudBase * 0.95, cloudShadow * 0.9);
+            } else { // Variant C: Wispy Cirrus (Light, High)
+                col = mix(skyTop * 0.95, skyBot * 1.05, uv.y); // Brighter, airier sky
+                // Negative density for wispy strings, slow time (time * 0.6)
+                col = renderClouds(st, time * 0.6, col, -0.1, sunDir, cloudBase * 1.1, cloudShadow * 1.05);
+            }
         } else if (code == 2) { // Overcast/Fog
             col = mix(skyTop * 0.6, skyBot * 0.6, uv.y);
             col = renderClouds(st, time, col, 0.5, sunDir, cloudBase * 0.85, cloudShadow * 0.9);
-        } else if (code == 3) { // Storm
-             col = mix(float3(0.04, 0.04, 0.05), float3(0.08, 0.08, 0.15), uv.y); 
-             float flash = lightning(uv, time);
-             col += float3(0.85, 0.9, 1.0) * flash * 0.5;
-             col = renderClouds(st, time * 1.6, col, 0.4, sunDir, cloudBase * 0.45, cloudShadow * 0.4);
-             float rain = particles(st * float2(1.0, 0.1), time, 6.0, 15.0, 50.0);
-             col += float3(0.6, 0.75, 1.0) * rain * 0.45;
+        } else if (code == 3) { // Storm/Rain
+             if (variant == 0) { // Variant A: Thunderstorm (Original)
+                 col = mix(float3(0.05, 0.05, 0.15), float3(0.15, 0.1, 0.3), uv.y); 
+                 float flash = lightning(uv, time);
+                 col += float3(0.85, 0.9, 1.0) * flash * 0.5;
+                 col = renderClouds(st, time * 1.6, col, 0.4, sunDir, cloudBase * 0.45, cloudShadow * 0.4);
+                 float rain = particles(st * float2(1.0, 0.1), time, 6.0, 15.0, 50.0);
+                 col += float3(0.6, 0.75, 1.0) * rain * 0.45;
+                 
+             } else if (variant == 1) { // Variant B: Light Drizzle (New)
+                 col = mix(float3(0.3, 0.35, 0.45), float3(0.5, 0.55, 0.65), uv.y); // Brighter Gloom
+                 // Soft clouds
+                 col = renderClouds(st, time * 0.8, col, 0.3, sunDir, float3(0.6), float3(0.5));
+                 // Gentle rain: slower, smaller
+                 float rain = particles(st * float2(1.5, 0.08), time, 4.0, 25.0, 20.0);
+                 col += float3(0.7, 0.8, 0.9) * rain * 0.3;
+                 
+             } else { // Variant C: Heavy Monsoon (New)
+                 col = mix(float3(0.02, 0.03, 0.05), float3(0.1, 0.12, 0.15), uv.y); // Deep Dark
+                 // Fast turbulent clouds
+                 col = renderClouds(st, time * 2.5, col, 0.5, sunDir, float3(0.2), float3(0.1));
+                 
+                 // Heavy Rain with Wind Slant
+                 float2 windUV = st;
+                 windUV.x += windUV.y * 0.2; // Slant
+                 float rain = particles(windUV * float2(0.8, 0.05), time, 9.0, 10.0, 80.0); // Fast, Dense
+                 col += float3(0.5, 0.6, 0.7) * rain * 0.5;
+             }
         }
     }
 

@@ -1,499 +1,419 @@
-
 import SwiftUI
+import AppKit
 
-// MARK: - Calendar Popover View
 struct CalendarPopoverView: View {
-    @StateObject private var viewModel = CalendarViewModel()
-    @State private var showingAddEvent = false
-    @AppStorage("startWeekOnMonday") private var startWeekOnMonday = false
-    @AppStorage("showWeekNumbers") private var showWeekNumbers = false
-    @AppStorage("showLunarCalendar") private var showLunarCalendar = false
+    @ObservedObject var viewModel: CalendarViewModel
+    @AppStorage("showLunarCalendar") private var showLunarCalendar = true
+    @AppStorage("isPinnedToDesktop") private var isPinnedToDesktop = false
+    @AppStorage("showWeather") private var showWeather = true
+    @AppStorage("weatherStyle") private var weatherStyleRaw = WeatherStyle.realistic.rawValue
     @AppStorage("appTheme") private var appThemeRaw: String = AppTheme.system.rawValue
-    @AppStorage("showFestiveEffects") private var showFestiveEffects = true
-    @AppStorage("weatherStyle") private var weatherStyleRaw: String = WeatherStyle.realistic.rawValue
-    @AppStorage("debugWeatherCode") private var debugWeatherCode = -1
-    @AppStorage("debugTimeOfDay") private var debugTimeOfDay = 0
-    @AppStorage("demoFestival") var demoFestivalRaw: String = Festival.none.rawValue
-    
-    var appTheme: AppTheme {
-        AppTheme(rawValue: appThemeRaw) ?? .system
-    }
-    
-    private var currentFestival: Festival {
-        if let demo = Festival(rawValue: demoFestivalRaw), demo != .none {
-            return demo
+    @AppStorage("showWeekNumbers") private var showWeekNumbers = true
+
+    var currentTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .system }
+    var colorScheme: ColorScheme? {
+        switch currentTheme {
+        case .light: return .light
+        case .dark: return .dark
+        case .system: return nil
         }
-        return HolidayManager.shared.getCurrentFestival()
     }
     
-    @State private var selectedEvent: CalendarEvent? = nil
+    @ObservedObject var dragState: DesktopWindowController.DragState
+    
+    @State private var showingAddEvent = false
+    @State private var selectedEvent: CalendarEvent?
+    @State private var contentHeight: CGFloat = 0
     @State private var currentPopoverWidth: CGFloat = 340
     
-    private func closeEvent() {
-        withAnimation(.spring()) {
-            selectedEvent = nil
-            currentPopoverWidth = 340
-        }
-    }
+    // Debug / Preview Settings (Synced with SettingsView)
+    @AppStorage("debugWeatherCode") private var debugWeatherCode: Int = -1
+    @AppStorage("debugTimeOfDay") private var debugTimeOfDay: Int = 0
     
-    private var weekdays: [String] {
-        if startWeekOnMonday {
-            return ["一", "二", "三", "四", "五", "六", "日"]
-        } else {
-            return ["日", "一", "二", "三", "四", "五", "六"]
-        }
-    }
-    
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
-    
-    // MARK: - Time of Day Logic
-    private var currentTimeOfDay: Int {
+    @State private var weatherVariant: Int = Int.random(in: 0...3) // Randomize Variant (0..3)
+    let weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+
+    var currentTimeOfDay: Int {
         let hour = Calendar.current.component(.hour, from: Date())
-        if hour >= 19 || hour < 6 { return 2 } // Night
-        if hour >= 17 || hour <= 7 { return 1 } // Sunset/Sunrise
-        return 0 // Day
-    }
-    
-    @AppStorage("showWeather") private var showWeather = false
-    
-    // MARK: - Dynamic Text Color
-    private func weatherTextColor(for weatherCode: Int, time: Int? = nil) -> Color {
-        // If weather is disabled, always use primary color
-        if !showWeather { return .primary }
-        
-        let t = time ?? currentTimeOfDay
-        
-        // Night (2) or Sunset (1) generally use dark-themed weather animations -> White text
-        if t == 2 || t == 1 { return .white }
-        
-        // Day time (0) logic
-        switch weatherCode {
-        case 0, 1, 2, 3, 45, 48: 
-            // Clear, Cloudy, Fog are BRIGHT backgrounds. 
-            // We use dark text even if system is in dark mode.
-            return Color(red: 0.05, green: 0.05, blue: 0.1) // Near black with slight blue tint
-        case 51...65, 80...82, 95...99: 
-            // Rain/Storm backgrounds are DARK/GREY -> White text
-            return .white
-        default:
-            // Fallback for other day-time weathers (e.g. snow, if not covered)
-            if weatherCode >= 71 && weatherCode <= 77 { return Color(red: 0.05, green: 0.05, blue: 0.1) }
-            return .primary
-        }
-    }
-    
-    private func weatherSecondaryTextColor(for weatherCode: Int, time: Int? = nil) -> Color {
-        // If weather is disabled, use secondary color
-        if !showWeather { return .secondary }
-        
-        let baseColor = weatherTextColor(for: weatherCode, time: time)
-        // If base is dark (the near-black we defined), return a muted version of it
-        if baseColor != .white && baseColor != .primary {
-            return baseColor.opacity(0.6)
-        }
-        return baseColor == .white ? Color.white.opacity(0.8) : Color.secondary
-    }
-    
-    // Helper for header color to avoid ViewBuilder syntax issues
-    private var headerColor: Color {
-        let weather = viewModel.currentWeather
-        let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
-        let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
-        
-        if showWeather {
-             return weatherTextColor(for: actualWeatherCode, time: actualTimeOfDay)
+        if hour >= 6 && hour < 17 {
+            return 0 // Day
+        } else if hour >= 17 && hour < 19 {
+            return 1 // Sunset
         } else {
-            return .secondary
+            return 2 // Night
+        }
+    }
+
+    private var headerColor: Color {
+        return showWeather ? .white : .primary
+    }
+
+    private var heightReader: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(key: HeightPreferenceKey.self, value: geometry.size.height)
         }
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            
-            // ========== Unified Header Box (Weather Bg + Info + Weekdays) ==========
+        // CONTENT LAYER (With ClipShape)
+        ZStack(alignment: .top) {
+            // 1. 常規日曆視圖
             ZStack(alignment: .top) {
-                // 1. Weather Background Layer
-                if showWeather {
-                    let weather = viewModel.currentWeather
-                    let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
-                    let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
-                    
-                    WeatherAnimationView(
-                        weatherCode: actualWeatherCode,
-                        timeOfDay: actualTimeOfDay,
-                        style: WeatherStyle(rawValue: weatherStyleRaw) ?? .realistic
-                    )
-                        .frame(height: 110) // Bleed down behind grid
-                        .frame(maxWidth: .infinity)
+                skyBackground
+                VStack(spacing: 0) {
+                    premiumHeader
+                    calendarGrid
+                    if selectedEvent == nil {
+                        eventListArea
+                    }
+                }
+            }
+            // 2. 事件詳情視圖
+            if let event = selectedEvent {
+                Color.black.opacity(0.01).ignoresSafeArea().onTapGesture { 
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        currentPopoverWidth = 340
+                        selectedEvent = nil 
+                    }
                 }
                 
-                // 2. Content Layer (Info Row + Navigation Row + Weekday Row)
-                VStack(spacing: 0) {
-                    let weather = viewModel.currentWeather
-                    // Override with debug settings if active
-                    let actualWeatherCode = debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0)
-                    let actualTimeOfDay = debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay
-                    let textColor = weatherTextColor(for: actualWeatherCode, time: actualTimeOfDay)
-                    let secondaryColor = weatherSecondaryTextColor(for: actualWeatherCode, time: actualTimeOfDay)
-                    
-                    // Row 1: Date & Weather (Height 32)
-                    HStack(alignment: .center) {
-                        Text(viewModel.currentMonthYear)
-                            .font(.system(size: 19, weight: .bold))
-                            .foregroundColor(textColor)
-                        
-                        Spacer()
-                        
-                        // Weather Info (Only show if enabled and available)
-                        if showWeather, let weather = weather {
-                            HStack(spacing: 6) {
-                                Image(systemName: weather.symbolName)
-                                    .font(.system(size: 14))
-                                Text(weather.temperatureFormatted)
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text(weather.condition)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(secondaryColor)
-                            }
-                            .foregroundColor(textColor)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(height: 32)
-                    
-                    // Row 2: Navigation (Height 28)
-                    HStack(spacing: 0) {
-                        Button(action: { viewModel.previousMonth() }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(textColor)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Spacer()
-                        
-                        Button("今天") { viewModel.goToToday() }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(textColor)
-                        
-                        Spacer()
-                        
-                        Button(action: { viewModel.nextMonth() }) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(textColor)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Button(action: { openSettingsWindow() }) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(secondaryColor)
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    
-                    // Row 3: Weekdays (Height 30)
-                    HStack(spacing: 0) {
-                        if showWeekNumbers {
-                            Text("週")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(headerColor)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 30)
-                            Divider().frame(height: 16).opacity(0.3)
-                        }
-                        ForEach(weekdays, id: \.self) { day in
-                            Text(day)
-                                .font(.system(size: 12, weight: .semibold)) // Increased weight for contrast
-                                .foregroundColor(headerColor)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 30)
-                        }
-                    }
-                    .frame(height: 30)
-                }
-                .frame(maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 5) // 將整組資訊往下移動 5px (原為 10px)
-                .shadow(color: Color.black.opacity(0.4), radius: 2, x: 0, y: 1)
-            }
-            .frame(height: 110) // 指令：Header 高度鎖死
-                Divider()
-            
-            // ========== Main Content (Grid + Events) ==========
-            VStack(spacing: 0) {
-                let totalRows = 6
-                VStack(spacing: 4) {
-                    ForEach(0..<totalRows, id: \.self) { rowIndex in
-                        HStack(spacing: 0) {
-                            if showWeekNumbers {
-                                let weekIndex = rowIndex * 7
-                                if weekIndex < viewModel.days.count {
-                                    Text("\(viewModel.days[weekIndex].weekNumber)")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(.secondary.opacity(0.85))
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: showLunarCalendar ? 54 : 48)
-                                } else {
-                                    Spacer().frame(maxWidth: .infinity)
+                VStack {
+                    // Spacer() removed to prevent pushing content down
+                    if let location = event.location, !location.isEmpty {
+                        EventLocationDetailViewWrapper(
+                            viewModel: viewModel,
+                            event: event,
+                            popoverWidth: $currentPopoverWidth,
+                            onClose: {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    currentPopoverWidth = 340 // Reset width
+                                    selectedEvent = nil
                                 }
-                                Divider().frame(height: showLunarCalendar ? 40 : 36)
-                            }
-                            
-                            ForEach(0..<7) { colIndex in
-                                let dayIndex = rowIndex * 7 + colIndex
-                                if dayIndex < viewModel.days.count {
-                                    let day = viewModel.days[dayIndex]
-                                    DayCell(
-                                        day: day,
-                                        isSelected: viewModel.isSelected(day),
-                                        isToday: viewModel.isToday(day),
-                                        hasEvents: viewModel.hasEvents(on: day.date),
-                                        showLunar: showLunarCalendar
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .onTapGesture {
-                                        viewModel.selectDate(day.date)
-                                    }
-                                } else {
-                                    Spacer().frame(maxWidth: .infinity)
+                            },
+                            onDelete: {
+                                withAnimation {
+                                    viewModel.deleteEvent(event)
+                                    currentPopoverWidth = 340
+                                    selectedEvent = nil
                                 }
                             }
-                        }
+                        )
+                    } else {
+                        EventDetailView(
+                            viewModel: viewModel,
+                            event: event,
+                            onClose: { selectedEvent = nil }, // Standard detail doesn't change width?
+                            onDelete: { withAnimation { viewModel.deleteEvent(event); selectedEvent = nil } }
+                        )
+                        .transition(.move(edge: .bottom))
                     }
                 }
-                .padding(.top, 4)
+                .background(colorScheme == .dark ? Color.black : Color.white)
+                .zIndex(2)
             }
-            .padding(.horizontal, 4)
-            .padding(.bottom, 12)
-            Divider()
-            
-            // Event List
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Text(viewModel.selectedDateString)
-                        .font(.system(size: 14, weight: .semibold))
-                    Spacer()
-                    Button(action: { showingAddEvent = true }) {
-                        Image(systemName: "plus.circle.fill")
+        }
+        .frame(width: currentPopoverWidth)
+        .frame(height: (selectedEvent != nil) ? nil : 650, alignment: .top)
+        .background(isPinnedToDesktop ? Color.clear : (colorScheme == .dark ? Color.black : Color.white))
+        .clipShape(RoundedRectangle(cornerRadius: isPinnedToDesktop ? 12 : 10)) // 剪裁內容
+        // SHADOW LAYER (Applied to Background, Unclipped)
+        .background(
+            UnclippedShadow(
+                isActive: isPinnedToDesktop,
+                colorScheme: colorScheme
+            )
+        )
+        .padding(isPinnedToDesktop ? 40 : 0) // 40px for shadow breathing room
+        .preferredColorScheme(colorScheme)
+        // Ensure we capture the height INCLUDING the padding
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: HeightPreferenceKey.self, value: geo.size.height)
+            }
+        )
+        .onPreferenceChange(HeightPreferenceKey.self, perform: handleHeightChange)
+        .onChange(of: currentPopoverWidth) { _ in notifySizeUpdate() }
+        .onChange(of: contentHeight) { _ in notifySizeUpdate() }
+        .onChange(of: isPinnedToDesktop) { _ in notifySizeUpdate() }
+        .sheet(isPresented: $showingAddEvent) { AddEventView(viewModel: viewModel, isPresented: $showingAddEvent) }
+    }
+    
+    // Helper View for Shadow
+    struct UnclippedShadow: View {
+        let isActive: Bool
+        let colorScheme: ColorScheme?
+        var body: some View {
+            if isActive {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(colorScheme == .dark ? Color.black : Color.white)
+                    .shadow(color: .black.opacity(0.35), radius: 10, x: 0, y: 1.5)
+                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 0)
+            }
+        }
+    }
+    // MARK: - Subviews
+
+    private var skyBackground: some View {
+        Group {
+            if showWeather && !dragState.isDragging {
+                let weather = viewModel.currentWeather
+                WeatherAnimationView(
+                    weatherCode: debugWeatherCode != -1 ? debugWeatherCode : (weather?.weatherCode ?? 0),
+                    timeOfDay: debugWeatherCode != -1 ? debugTimeOfDay : currentTimeOfDay,
+                    style: WeatherStyle(rawValue: weatherStyleRaw) ?? .realistic,
+                    variant: weatherVariant
+                )
+                .frame(height: isPinnedToDesktop ? (selectedEvent != nil ? CGFloat(110) : CGFloat(400)) : CGFloat(120))
+            } else {
+                (colorScheme == .dark ? Color.black : Color.white)
+                    .frame(height: isPinnedToDesktop ? (selectedEvent != nil ? CGFloat(110) : CGFloat(400)) : CGFloat(120))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .zIndex(0)
+    }
+
+    private var premiumHeader: some View {
+        VStack(spacing: 0) {
+            // Split Quadrant Layout
+            // Top Row
+            HStack(alignment: .top) {
+                // Top-Left: Month Title
+                Text(viewModel.currentMonthNameShort)
+                    .font(.system(size: 28, weight: .bold)) // Larger font for simplified title
+                    .foregroundColor(headerColor)
+                
+                Spacer()
+                
+                // Top-Right: Weather Info (Info Up)
+                if let weather = viewModel.currentWeather {
+                    HStack(spacing: 6) {
+                        Image(systemName: weather.symbolName)
                             .font(.system(size: 20))
-                            .foregroundColor(.blue)
+                        Text(weather.temperatureFormatted)
+                            .font(.system(size: 20, weight: .bold)) // Slightly larger
+                    }
+                    .foregroundColor(headerColor)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            
+            Spacer()
+            
+            // Bottom Row
+            HStack(alignment: .bottom) {
+                // Bottom-Left: Navigation
+                HStack(spacing: 12) {
+                    Button(action: { viewModel.previousMonth() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .bold)) // Slightly larger
+                            .foregroundColor(headerColor) 
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(action: { viewModel.goToToday() }) { 
+                        Text("今天")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(headerColor) 
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(action: { viewModel.nextMonth() }) { 
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(headerColor) 
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
                 
-                if !viewModel.hasCalendarAccess {
-                    VStack(spacing: 8) {
-                        Image(systemName: "calendar.badge.exclamationmark")
-                            .font(.system(size: 28))
-                            .foregroundColor(.orange)
-                        Text("需要日曆存取權限").font(.system(size: 13, weight: .semibold))
-                        Text("授權後即可查看與新增事件").font(.system(size: 11)).foregroundColor(.secondary)
-                        Button("授權存取") { viewModel.requestCalendarAccess() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .padding(.top, 4)
+                Spacer()
+                
+                // Bottom-Right: Utility Buttons (Function Down)
+                HStack(spacing: 16) {
+                    Button(action: { isPinnedToDesktop.toggle(); NotificationCenter.default.post(name: Notification.Name("ToggleDesktopMode"), object: isPinnedToDesktop) }) { 
+                        Image(systemName: isPinnedToDesktop ? "pin.fill" : "pin")
+                            .font(.system(size: 15)) // Moderate size
+                            .foregroundColor(headerColor.opacity(0.8)) 
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            if viewModel.selectedDateEvents.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "calendar.badge.checkmark")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.secondary.opacity(0.5))
-                                    Text("沒有事件").font(.system(size: 14)).foregroundColor(.secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 30)
-                            } else {
-                                ForEach(viewModel.selectedDateEvents) { event in
-                                    HStack(spacing: 12) {
-                                        RoundedRectangle(cornerRadius: 2)
-                                            .fill(event.color)
-                                            .frame(width: 4, height: 40)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(event.title)
-                                                .font(.system(size: 14, weight: .medium))
-                                                .lineLimit(1)
-                                            Text(event.timeString)
-                                                .font(.system(size: 12))
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        withAnimation(.spring()) { selectedEvent = event }
-                                    }
-                                }
-                            }
-                            
-                            if !viewModel.todoistTasks.isEmpty {
-                                Divider().padding(.vertical, 8)
-                                HStack {
-                                    Image(systemName: "checklist").foregroundColor(Color(red: 228/255, green: 67/255, blue: 50/255))
-                                    Text("Todoist").font(.system(size: 13, weight: .semibold)).foregroundColor(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.bottom, 4)
-                                ForEach(viewModel.todoistTasks) { task in
-                                    HStack(alignment: .top, spacing: 12) {
-                                        Image(systemName: "circle").font(.system(size: 14)).foregroundColor(.secondary).padding(.top, 3)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(task.content).font(.system(size: 14)).lineLimit(2)
-                                            if let duestring = task.due?.string {
-                                                Text(duestring).font(.system(size: 11)).foregroundColor(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 12).padding(.vertical, 8)
-                                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        if let url = URL(string: task.url) { NSWorkspace.shared.open(url) }
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
+                    .buttonStyle(.plain)
+                    
+                    Button(action: { openSettingsWindow() }) { 
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 15))
+                            .foregroundColor(headerColor.opacity(0.8)) 
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            .background(Color(NSColor.windowBackgroundColor))
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
         }
-        .frame(minWidth: 340, maxWidth: .infinity)
-        .frame(width: currentPopoverWidth, height: 650)
-        .zIndex(1)
-        .background(Color(NSColor.windowBackgroundColor))
-        .preferredColorScheme(appTheme.colorScheme)
-        .overlay(
-            ZStack {
-                if let event = selectedEvent {
-                    Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { closeEvent() }
-                    VStack {
-                        Spacer()
-                        
-                        // 使用不同的視圖根據是否有地點
-                        if let location = event.location, !location.isEmpty {
-                            EventLocationDetailViewWrapper(
-                                viewModel: viewModel,
-                                event: event,
-                                popoverWidth: $currentPopoverWidth,
-                                onClose: { closeEvent() },
-                                onDelete: { withAnimation { viewModel.deleteEvent(event); closeEvent() } }
-                            )
-                            .transition(.move(edge: .bottom))
-                            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
-                        } else {
-                            EventDetailView(
-                                viewModel: viewModel,
-                                event: event,
-                                onClose: { closeEvent() },
-                                onDelete: { withAnimation { viewModel.deleteEvent(event); closeEvent() } }
-                            )
-                            .frame(height: 480)
-                            .transition(.move(edge: .bottom))
-                            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: -5)
-                        }
-                    }
-                }
-            }
-        )
-        .sheet(isPresented: $showingAddEvent) {
-            AddEventView(viewModel: viewModel, isPresented: $showingAddEvent)
-                .preferredColorScheme(appTheme.colorScheme)
-        }
+        .frame(height: 120) // Keep fixed height for header area
     }
+
+    private var calendarGrid: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                if showWeekNumbers { 
+                    Text("週").font(.system(size: 11, weight: .bold)).foregroundColor(isPinnedToDesktop ? headerColor.opacity(0.4) : .secondary.opacity(0.4)).frame(width: 25)
+                    Divider().frame(height: 12).opacity(0.2).padding(.horizontal, 4) 
+                }
+                ForEach(weekdays, id: \.self) { day in 
+                    Text(day).font(.system(size: 12, weight: .bold)).foregroundColor(isPinnedToDesktop ? headerColor.opacity(0.7) : .secondary.opacity(0.7)).frame(maxWidth: .infinity) 
+                }
+            }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: showWeekNumbers ? 8 : 7), spacing: 0) {
+                // 強制顯示 5 週 (35天)，解決佈局過高的問題
+                ForEach(0..<min(viewModel.days.count, 35), id: \.self) { index in
+                    if showWeekNumbers && index % 7 == 0 {
+                        let day = viewModel.days[index]
+                        HStack(spacing: 0) {
+                            Text("\(day.weekNumber)").font(.system(size: 10, weight: .medium)).foregroundColor(isPinnedToDesktop ? headerColor.opacity(0.5) : .secondary.opacity(0.5)).frame(width: 25)
+                            Divider().frame(height: showLunarCalendar ? 36 : 32).opacity(0.2).padding(.horizontal, 4)
+                        }
+                    }
+                    let day = viewModel.days[index]
+                    DayCell(day: day, isSelected: viewModel.isSelected(day), isToday: viewModel.isToday(day), hasEvents: viewModel.hasEvents(on: day.date), showLunar: showLunarCalendar, isDesktopMode: isPinnedToDesktop)
+                        .frame(maxWidth: .infinity)
+                        .onTapGesture { viewModel.selectDate(day.date) }
+                }
+            }.padding(.horizontal, 8)
+        }
+        .background(isPinnedToDesktop ? Color.clear : (colorScheme == .dark ? Color.black : Color.white))
+        .frame(height: isPinnedToDesktop ? 245 : 240) // 5週高度調整
+    }
+
+    private var eventListArea: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider()
+            HStack {
+                Text(viewModel.selectedDateString).font(.system(size: 15, weight: .bold)).foregroundColor(.primary)
+                Spacer()
+                Button(action: { showingAddEvent = true }) { Image(systemName: "plus.circle.fill").font(.system(size: 20)).foregroundColor(.blue) }.buttonStyle(.plain)
+            }.padding(.horizontal, 16).padding(.vertical, 12)
+            
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if viewModel.selectedDateEvents.isEmpty && viewModel.todoistTasks.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "calendar.badge.checkmark").font(.system(size: 40)).foregroundColor(.secondary.opacity(0.25)).padding(.top, 30)
+                            Text("沒有事件或待辦").font(.system(size: 14, weight: .medium)).foregroundColor(.secondary.opacity(0.7))
+                        }.frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(viewModel.selectedDateEvents) { event in
+                            HStack(spacing: 12) {
+                                RoundedRectangle(cornerRadius: 2).fill(event.color).frame(width: 4, height: 38)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(event.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).foregroundColor(.primary)
+                                    Text(event.timeString).font(.system(size: 12)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 10).background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04))).onTapGesture { withAnimation(.spring()) { selectedEvent = event } }
+                        }
+                        
+                        if !viewModel.todoistTasks.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("待辦事項").font(.system(size: 13, weight: .bold)).foregroundColor(.secondary).padding(.top, 10).padding(.bottom, 2)
+                                ForEach(viewModel.todoistTasks) { task in
+                                    HStack(spacing: 12) {
+                                        Image(systemName: task.isCompleted ? "checkmark.circle.fill" : "circle").foregroundColor(task.isCompleted ? .green : priorityColor(task.priority)).font(.system(size: 18))
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(task.content).font(.system(size: 14, weight: .medium)).strikethrough(task.isCompleted).foregroundColor(task.isCompleted ? .secondary : .primary).lineLimit(2)
+                                        }
+                                        Spacer()
+                                    }.padding(.horizontal, 12).padding(.vertical, 10).background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.04)))
+                                }
+                            }
+                        }
+                    }
+                }.padding(.horizontal, 16).padding(.bottom, 20)
+            }
+        }
+        .background(colorScheme == .dark ? Color.black : Color.white)
+        .frame(maxHeight: .infinity)
+    }
+
+
+    // MARK: - Handlers & Helpers
+
+    private func notifySizeUpdate() {
+        guard isPinnedToDesktop else { return }
+        // Guard against invalid sizes (e.g. during view transitions)
+        guard contentHeight > 50, currentPopoverWidth > 50 else { return }
+        
+        let totalWidth = currentPopoverWidth + 80
+        let sizeDict: [String: CGFloat] = ["width": totalWidth, "height": contentHeight]
+        NotificationCenter.default.post(name: Notification.Name("UpdateDesktopWindowSize"), object: sizeDict)
+    }
+
+    private func handleHeightChange(_ height: CGFloat) { contentHeight = height }
     
     private func openSettingsWindow() {
         let settingsView = SettingsView()
         let hostingController = NSHostingController(rootView: settingsView)
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "設定"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.center()
         window.makeKeyAndOrderFront(nil)
         window.level = .floating
     }
+
+    private func priorityColor(_ priority: Int) -> Color {
+        switch priority {
+        case 4: return .red
+        case 3: return .orange
+        case 2: return .blue
+        default: return .secondary.opacity(0.8)
+        }
+    }
 }
 
-// MARK: - Day Cell
 struct DayCell: View {
     let day: CalendarDay
     let isSelected: Bool
     let isToday: Bool
     let hasEvents: Bool
     let showLunar: Bool
-    
+    let isDesktopMode: Bool
     @State private var isHovering = false
     @AppStorage("eventIndicatorColor") private var eventIndicatorColorHex = "#007AFF"
-    
     var body: some View {
         VStack(spacing: showLunar ? 3 : 2) {
             ZStack {
-                if isSelected {
-                    Circle().fill(Color.blue).frame(width: 34, height: 34)
-                } else if isToday {
-                    Circle().stroke(Color.blue, lineWidth: 2).frame(width: 34, height: 34)
-                } else if isHovering {
-                    Circle().fill(Color.secondary.opacity(0.1)).frame(width: 34, height: 34)
-                }
-                
+                if isSelected { Circle().fill(Color.blue).frame(width: 32, height: 32) }
+                else if isToday { Circle().stroke(Color.blue, lineWidth: 2).frame(width: 32, height: 32) }
+                else if isHovering { Circle().fill(isDesktopMode ? Color.white.opacity(0.1) : Color.secondary.opacity(0.1)).frame(width: 32, height: 32) }
                 VStack(spacing: 2) {
-                    Text("\(day.day)")
-                        .font(.system(size: 14, weight: isToday || isSelected ? .semibold : .regular))
-                        .foregroundColor(textColor)
-                    
-                    if showLunar && !day.lunarDay.isEmpty {
-                        Text(day.lunarDay)
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(lunarTextColor)
-                    }
+                    Text("\(day.day)").font(.system(size: 14, weight: isToday || isSelected ? .bold : .medium)).foregroundColor(isSelected ? .white : (hasEvents ? Color(hex: eventIndicatorColorHex) ?? .blue : (isDesktopMode ? (day.isCurrentMonth ? .white : .white.opacity(0.4)) : (day.isCurrentMonth ? .primary : .secondary.opacity(0.4)))))
+                    if showLunar && !day.lunarDay.isEmpty { Text(day.lunarDay).font(.system(size: 9, weight: .medium)).foregroundColor(isSelected ? .white.opacity(0.8) : (isDesktopMode ? .white.opacity(0.6) : .secondary.opacity(0.7))) }
                 }
-            }
-            .frame(width: 38, height: 38)
-        }
-        .frame(height: showLunar ? 54 : 48)
-        .contentShape(Rectangle())
-        .onHover { hovering in isHovering = hovering }
-    }
-    
-    private var textColor: Color {
-        if isSelected { return .white }
-        if hasEvents { return Color(hex: eventIndicatorColorHex) ?? .blue }
-        if !day.isCurrentMonth { return .secondary.opacity(0.4) }
-        else if day.isWeekend { return .secondary }
-        return .primary
-    }
-    
-    private var lunarTextColor: Color {
-        if isSelected { return .white.opacity(0.85) }
-        else if !day.isCurrentMonth { return .secondary.opacity(0.3) }
-        else { return .secondary.opacity(0.75) }
+            }.frame(width: 34, height: 34)
+        }.frame(height: showLunar ? 50 : 44).contentShape(Rectangle()).onHover { isHovering = $0 }
     }
 }
 
-// MARK: - Visual Effect Blur
+struct EventLocationDetailViewWrapper: View {
+    @ObservedObject var viewModel: CalendarViewModel
+    let event: CalendarEvent
+    @Binding var popoverWidth: CGFloat
+    var onClose: () -> Void
+    var onDelete: () -> Void
+    @StateObject private var routeViewModel = RouteViewModel()
+    var body: some View {
+        EventLocationDetailView(viewModel: viewModel, event: event, routeInfo: routeViewModel.routeInfo, onClose: onClose, onDelete: onDelete, popoverWidth: $popoverWidth)
+            .onAppear { if let coord = event.locationCoordinate { Task { await routeViewModel.calculateRoute(to: coord) } } }
+    }
+}
+
+struct HeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
 struct VisualEffectBlur: NSViewRepresentable {
     var material: NSVisualEffectView.Material
     var blendingMode: NSVisualEffectView.BlendingMode
@@ -504,38 +424,5 @@ struct VisualEffectBlur: NSViewRepresentable {
         view.state = .active
         return view
     }
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
-
-// MARK: - Event Location Detail View Wrapper
-struct EventLocationDetailViewWrapper: View {
-    @ObservedObject var viewModel: CalendarViewModel
-    let event: CalendarEvent
-    @Binding var popoverWidth: CGFloat
-    var onClose: () -> Void
-    var onDelete: () -> Void
-    
-    @StateObject private var routeViewModel = RouteViewModel()
-    
-    var body: some View {
-        EventLocationDetailView(
-            viewModel: viewModel,
-            event: event,
-            routeInfo: routeViewModel.routeInfo,
-            onClose: onClose,
-            onDelete: onDelete,
-            popoverWidth: $popoverWidth
-        )
-        .onAppear {
-            // Calculate route if event has location
-            if let coordinate = event.locationCoordinate {
-                Task {
-                    await routeViewModel.calculateRoute(to: coordinate)
-                }
-            }
-        }
-    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

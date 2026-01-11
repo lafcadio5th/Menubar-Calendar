@@ -12,50 +12,41 @@ struct MacMenuBarCalendarApp: App {
     }
 }
 
-// MARK: - App Delegate
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     var menu: NSMenu!
+    var desktopWindowController: DesktopWindowController?
+    var calendarViewModel = CalendarViewModel()
+    
+    @AppStorage("isPinnedToDesktop") private var isPinnedToDesktop: Bool = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("✅ App 已啟動！")
         
         // 建立 Status Item (Menu Bar 圖標)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        print("✅ StatusItem 已建立：\(statusItem != nil)")
         
         // 設定按鈕
         if let button = statusItem.button {
-            print("✅ Button 已取得")
-            
             button.image = NSImage(systemSymbolName: "calendar", accessibilityDescription: "行事曆")
             button.imagePosition = .imageLeading
             button.action = #selector(togglePopover)
             button.target = self
-            
-            // 添加右鍵選單
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             
-            // 更新選單列標題
             updateMenuBarTitle()
             
-            // 每分鐘更新一次時間
             Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
                 self?.updateMenuBarTitle()
             }
             
-            // 監聽設定變更
             NotificationCenter.default.addObserver(
                 self,
                 selector: #selector(updateMenuBarTitle),
                 name: UserDefaults.didChangeNotification,
                 object: nil
             )
-            
-            print("✅ Button 設定完成，標題：\(button.title)")
-        } else {
-            print("❌ 無法取得 Button")
         }
         
         // 建立選單
@@ -66,10 +57,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 340, height: 650)
         popover.behavior = .transient
         popover.animates = true
-        popover.contentViewController = NSHostingController(rootView: CalendarPopoverView())
         
-        print("✅ Popover 已建立")
+        // Use shared viewModel and provide a dummy DragState or handle it internally
+        let contentView = CalendarPopoverView(
+            viewModel: calendarViewModel,
+            dragState: DesktopWindowController.DragState() 
+        )
+        popover.contentViewController = NSHostingController(rootView: contentView)
+        
+        // 建立 Desktop Window Controller
+        desktopWindowController = DesktopWindowController()
+        
+        // 如果原本就是釘選狀態，則顯示桌面組件
+        if isPinnedToDesktop {
+            desktopWindowController?.show()
+        }
+        
+        // 監聽 isPinnedToDesktop 的變化
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePinnedStateChange),
+            name: UserDefaults.didChangeNotification,
+            object: nil
+        )
+        
+        print("✅ 全局初始化完成")
     }
+    
+    @objc func handlePinnedStateChange() {
+        print("📢 UserDefaults changed, checking isPinnedToDesktop")
+        print("   isPinnedToDesktop: \(isPinnedToDesktop)")
+        
+        if isPinnedToDesktop {
+            print("   Showing desktop window")
+            popover.performClose(nil)
+            desktopWindowController?.show()
+        } else {
+            print("   Hiding desktop window")
+            desktopWindowController?.hide()
+        }
+    }
+
+    // ... (rest of the functions remain same, but I'll update togglePopover for the pinning logic later)
     
     @objc func updateMenuBarTitle() {
         guard let button = statusItem.button else { return }
@@ -121,6 +150,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func togglePopover() {
         print("🖱️ togglePopover 被呼叫")
         
+        // 如果已經釘選在桌面，點擊 Menu Bar 圖標應該視為無效或重新激活桌面視窗
+        if isPinnedToDesktop {
+            print("⚓ 已釘選在桌面，僅激活桌面視窗")
+            desktopWindowController?.show()
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        
         guard let button = statusItem.button else {
             print("❌ 無法取得 button")
             return
@@ -145,5 +182,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
+    
+    func pinToDesktop() {
+        print("📌 pinToDesktop() called")
+        print("   Current isPinnedToDesktop: \(isPinnedToDesktop)")
+        print("   DesktopWindowController exists: \(desktopWindowController != nil)")
+        
+        isPinnedToDesktop = true
+        popover.performClose(nil)
+        
+        if let controller = desktopWindowController {
+            print("   Calling desktopWindowController.show()")
+            controller.show()
+        } else {
+            print("   ❌ DesktopWindowController is nil!")
+        }
+    }
+    
+    func unpinFromDesktop() {
+        print("🔓 unpinFromDesktop() called")
+        isPinnedToDesktop = false
+        desktopWindowController?.hide()
+    }
 }
-

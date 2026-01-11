@@ -54,31 +54,41 @@ struct MapSnapshotView: View {
             }
         }
         .frame(width: size.width, height: size.height)
-        .onAppear {
-            generateSnapshot()
-        }
-        .onChange(of: size) { oldValue, newValue in
-            // 尺寸變化時重新生成
-            generateSnapshot()
+        .task(id: size) {
+            await generateSnapshot()
         }
     }
     
-    private func generateSnapshot() {
-        isLoading = true
+    private func generateSnapshot() async {
+        // Only set loading if we don't present an image yet or if size changed significantly?
+        // Actually, just keep it simple.
+        
+        // Don't modify state immediately if we are in a view update?
+        // .task is safe.
+        // But setting isLoading = true causes a re-render.
+        if mapImage == nil {
+             isLoading = true
+        }
+        // If we already have an image, maybe don't flicker to loading unless necessary?
+        // But for resize, we probably want to show loading or keep old image stretched?
+        // Keep old image until new one is ready is better UX!
+        // So let's NOT set isLoading = true if we have an image, just let it update.
+        // But the user might want to know it's updating.
+        // Let's stick to simple logic first: 
+        // 1. If mapImage is nil, isLoading = true.
+        // 2. Fetch.
+        // 3. Update mapImage.
+        
         error = nil
         
-        Task {
-            do {
-                let image = try await mapService.generateMapSnapshot(route: route, size: size)
-                await MainActor.run {
-                    self.mapImage = image
-                    self.isLoading = false
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.isLoading = false
-                }
+        do {
+            let image = try await mapService.generateMapSnapshot(route: route, size: size)
+            self.mapImage = image
+            self.isLoading = false
+        } catch {
+            if !Task.isCancelled {
+                self.error = error
+                self.isLoading = false
                 print("Map snapshot error: \(error.localizedDescription)")
             }
         }
